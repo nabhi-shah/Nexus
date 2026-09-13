@@ -368,10 +368,10 @@ class LensScraper: ObservableObject {
         }
         
         let fileUrl = URL(fileURLWithPath: filePath)
-        let imageData = try? Data(contentsOf: fileUrl)
+        let rawImageData = try? Data(contentsOf: fileUrl)
         try? fileManager.removeItem(atPath: filePath) // Immediately delete the temp file once read
         
-        guard let data = imageData else {
+        guard let imageData = rawImageData else {
             DispatchQueue.main.async { self.isScraping = false }
             return
         }
