@@ -337,6 +337,7 @@ class LensScraper: ObservableObject {
                     NSApp.activate(ignoringOtherApps: true)
                     
                     if self?.useMockData == true {
+                        try? FileManager.default.removeItem(atPath: tempFilePath)
                         self?.loadMockData()
                     } else {
                         self?.uploadToSerpApi(filePath: tempFilePath)
@@ -367,7 +368,10 @@ class LensScraper: ObservableObject {
         }
         
         let fileUrl = URL(fileURLWithPath: filePath)
-        guard let imageData = try? Data(contentsOf: fileUrl) else {
+        let imageData = try? Data(contentsOf: fileUrl)
+        try? fileManager.removeItem(atPath: filePath) // Immediately delete the temp file once read
+        
+        guard let data = imageData else {
             DispatchQueue.main.async { self.isScraping = false }
             return
         }
@@ -390,8 +394,6 @@ class LensScraper: ObservableObject {
         request.httpBody = body
         
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            try? fileManager.removeItem(atPath: filePath)
-            
             guard let data = data else {
                 DispatchQueue.main.async {
                     self?.statusText = "Failed to reach SerpApi."
