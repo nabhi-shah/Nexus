@@ -1,68 +1,68 @@
 {
-  "images" : [
+  "images": [
     {
-      "filename" : "Vector.svg",
-      "idiom" : "mac",
-      "scale" : "1x",
-      "size" : "16x16"
+      "filename": "Vector_0.svg",
+      "idiom": "mac",
+      "scale": "1x",
+      "size": "16x16"
     },
     {
-      "filename" : "Vector.svg",
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "16x16"
+      "filename": "Vector_1.svg",
+      "idiom": "mac",
+      "scale": "2x",
+      "size": "16x16"
     },
     {
-      "filename" : "Vector.svg",
-      "idiom" : "mac",
-      "scale" : "1x",
-      "size" : "32x32"
+      "filename": "Vector_2.svg",
+      "idiom": "mac",
+      "scale": "1x",
+      "size": "32x32"
     },
     {
-      "filename" : "Vector.svg",
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "32x32"
+      "filename": "Vector_3.svg",
+      "idiom": "mac",
+      "scale": "2x",
+      "size": "32x32"
     },
     {
-      "filename" : "Vector.svg",
-      "idiom" : "mac",
-      "scale" : "1x",
-      "size" : "128x128"
+      "filename": "Vector_4.svg",
+      "idiom": "mac",
+      "scale": "1x",
+      "size": "128x128"
     },
     {
-      "filename" : "Vector.svg",
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "128x128"
+      "filename": "Vector_5.svg",
+      "idiom": "mac",
+      "scale": "2x",
+      "size": "128x128"
     },
     {
-      "filename" : "Vector.svg",
-      "idiom" : "mac",
-      "scale" : "1x",
-      "size" : "256x256"
+      "filename": "Vector_6.svg",
+      "idiom": "mac",
+      "scale": "1x",
+      "size": "256x256"
     },
     {
-      "filename" : "Vector.svg",
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "256x256"
+      "filename": "Vector_7.svg",
+      "idiom": "mac",
+      "scale": "2x",
+      "size": "256x256"
     },
     {
-      "filename" : "Vector.svg",
-      "idiom" : "mac",
-      "scale" : "1x",
-      "size" : "512x512"
+      "filename": "Vector_8.svg",
+      "idiom": "mac",
+      "scale": "1x",
+      "size": "512x512"
     },
     {
-      "filename" : "Vector.svg",
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "512x512"
+      "filename": "Vector_9.svg",
+      "idiom": "mac",
+      "scale": "2x",
+      "size": "512x512"
     }
   ],
-  "info" : {
-    "author" : "xcode",
-    "version" : 1
+  "info": {
+    "author": "xcode",
+    "version": 1
   }
 }
