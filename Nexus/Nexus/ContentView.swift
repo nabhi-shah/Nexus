@@ -37,13 +37,31 @@ class CaptureWindow: NSWindow {
 }
 
 struct CornerShape: Shape {
+    var radius: CGFloat
+    
     func path(in rect: CGRect) -> Path {
         var path = Path()
+        let center = CGPoint(x: radius, y: radius)
+        
         path.move(to: CGPoint(x: 0, y: rect.height))
-        path.addLine(to: CGPoint(x: 0, y: rect.height * 0.35))
-        path.addQuadCurve(to: CGPoint(x: rect.width * 0.35, y: 0),
-                          control: CGPoint(x: 0, y: 0))
-        path.addLine(to: CGPoint(x: rect.width, y: 0))
+        if rect.height > radius {
+            path.addLine(to: CGPoint(x: 0, y: radius))
+        }
+        
+        if radius > 0 {
+            path.addArc(center: center,
+                        radius: radius,
+                        startAngle: .degrees(180),
+                        endAngle: .degrees(270),
+                        clockwise: false)
+        } else {
+            path.addLine(to: CGPoint(x: 0, y: 0))
+        }
+        
+        if rect.width > radius {
+            path.addLine(to: CGPoint(x: rect.width, y: 0))
+        }
+        
         return path
     }
 }
@@ -138,23 +156,25 @@ struct CaptureOverlayView: View {
             
             // Liquid Glass & Corners
             ZStack {
+                let dynamicRadius = min(24, r.width / 2, r.height / 2)
+                let cSize: CGFloat = min(40, min(r.width / 2, r.height / 2))
+                
                 // Apple Liquid Glass
                 Color.clear
                     .frame(width: r.width, height: r.height)
-                    .glassEffect(.clear, in: .rect(cornerRadius: 24))
+                    .glassEffect(.clear, in: .rect(cornerRadius: dynamicRadius))
                 
-                let cSize: CGFloat = 24
                 let thick: CGFloat = 4
                 let col = Color.white.opacity(0.9)
                 let sh = Color.black.opacity(0.3)
                 
-                CornerShape().stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round))
+                CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round))
                     .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: -r.height/2 + cSize/2).shadow(color: sh, radius: 2)
-                CornerShape().stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(90))
+                CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(90))
                     .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: -r.height/2 + cSize/2).shadow(color: sh, radius: 2)
-                CornerShape().stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(180))
+                CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(180))
                     .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
-                CornerShape().stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(270))
+                CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(270))
                     .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
             }
             .position(x: r.midX, y: r.midY)
