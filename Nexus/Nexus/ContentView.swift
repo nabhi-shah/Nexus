@@ -156,8 +156,8 @@ struct CaptureOverlayView: View {
             
             // Liquid Glass & Corners
             ZStack {
-                let dynamicRadius = min(24, min(r.width / 4, r.height / 4))
-                let cSize = min(32, min(r.width / 2, r.height / 2))
+                let dynamicRadius = min(16, min(r.width / 4, r.height / 4))
+                let cSize = min(24, min(r.width / 3, r.height / 3))
                 
                 // Apple Liquid Glass
                 Color.clear
