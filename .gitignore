@@ -1,3 +1,5 @@
 .DS_Store
 ModuleCache/
 *.app/
+DerivedData/
+xcuserdata/
