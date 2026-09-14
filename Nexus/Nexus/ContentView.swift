@@ -253,15 +253,13 @@ struct CaptureOverlayView: View {
                         
                         // The moving group that falls and expands
                         ZStack {
-                            if buttonsExpanded {
-                                GlassMenuButton(icon: "phosphor_search", action: {}, manager: manager)
-                                    .offset(x: -148)
-                                    .glassEffectID("search", in: glassSpace)
-                                
-                                GlassMenuButton(icon: "phosphor_music-notes", action: {}, manager: manager)
-                                    .offset(x: -74)
-                                    .glassEffectID("music", in: glassSpace)
-                            }
+                            GlassMenuButton(icon: "phosphor_search", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
+                                .offset(x: buttonsExpanded ? -148 : 0)
+                                .glassEffectID("search", in: glassSpace)
+                            
+                            GlassMenuButton(icon: "phosphor_music-notes", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
+                                .offset(x: buttonsExpanded ? -74 : 0)
+                                .glassEffectID("music", in: glassSpace)
                             
                             GlassMenuButton(
                                 icon: "phosphor_translate",
@@ -275,15 +273,13 @@ struct CaptureOverlayView: View {
                             )
                             .glassEffectID("center", in: glassSpace)
                             
-                            if buttonsExpanded {
-                                GlassMenuButton(icon: "phosphor_cursor-text", action: {}, manager: manager)
-                                    .offset(x: 74)
-                                    .glassEffectID("text", in: glassSpace)
-                                
-                                GlassMenuButton(icon: "phosphor_x", action: { onCancel() }, manager: manager, isCloseButton: true)
-                                    .offset(x: 148)
-                                    .glassEffectID("close", in: glassSpace)
-                            }
+                            GlassMenuButton(icon: "phosphor_cursor-text", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
+                                .offset(x: buttonsExpanded ? 74 : 0)
+                                .glassEffectID("text", in: glassSpace)
+                            
+                            GlassMenuButton(icon: "phosphor_x", action: { onCancel() }, manager: manager, isCloseButton: true, isBlackDot: !buttonsExpanded)
+                                .offset(x: buttonsExpanded ? 148 : 0)
+                                .glassEffectID("close", in: glassSpace)
                         }
                         .offset(y: dropYOffset)
                     }
