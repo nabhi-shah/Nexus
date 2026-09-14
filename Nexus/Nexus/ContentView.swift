@@ -160,7 +160,7 @@ struct CaptureOverlayView: View {
                     .frame(height: 200)
                     .offset(y: isVisible ? 0 : 200)
             }
-            .ignoresSafeArea()
+            .ignoresSafeArea(.all, edges: [.bottom, .leading, .trailing])
             .allowsHitTesting(false)
             
             let r = manager.rect
@@ -210,6 +210,7 @@ struct CaptureOverlayView: View {
                             .padding(30)
                     }
                     .buttonStyle(PlainButtonStyle())
+                    .focusable(false)
                     .onHover { hovering in
                         manager.isHoveringClose = hovering
                         if hovering {
@@ -225,8 +226,10 @@ struct CaptureOverlayView: View {
             }
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.4)) {
-                isVisible = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                withAnimation(.easeOut(duration: 0.4)) {
+                    isVisible = true
+                }
             }
             manager.currentLoc = NSEvent.mouseLocation
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .leftMouseDown, .leftMouseUp, .keyDown]) { event in
@@ -331,7 +334,7 @@ class LensScraper: ObservableObject {
         })
         
         captureWindow = CaptureWindow(contentRect: manager.unionRect, styleMask: [.borderless], backing: .buffered, defer: false)
-        captureWindow?.level = .screenSaver
+        captureWindow?.level = .floating
         captureWindow?.backgroundColor = .clear
         captureWindow?.isOpaque = false
         captureWindow?.hasShadow = false
