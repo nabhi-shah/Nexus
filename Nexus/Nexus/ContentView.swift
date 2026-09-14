@@ -220,6 +220,29 @@ struct CaptureOverlayView: View {
     @State private var buttonsExpanded = false
     @State private var dropYOffset: CGFloat = -20
     @Namespace private var glassSpace
+    @State private var isClosing = false
+    
+    private func closeWithAnimation() {
+        guard !isClosing else { return }
+        isClosing = true
+        
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+            buttonsExpanded = false
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                dropYOffset = -20
+            }
+            withAnimation(.easeOut(duration: 0.4)) {
+                isVisible = false
+            }
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            onCancel()
+        }
+    }
     
     var body: some View {
         ZStack {
@@ -307,7 +330,7 @@ struct CaptureOverlayView: View {
                                 .offset(x: buttonsExpanded ? 58 : 0)
                                 .glassEffectID("text", in: glassSpace)
                             
-                            GlassMenuButton(icon: "phosphor_x", action: { onCancel() }, manager: manager, isCloseButton: true, isBlackDot: !buttonsExpanded)
+                            GlassMenuButton(icon: "phosphor_x", action: { closeWithAnimation() }, manager: manager, isCloseButton: true, isBlackDot: !buttonsExpanded)
                                 .offset(x: buttonsExpanded ? 116 : 0)
                                 .glassEffectID("close", in: glassSpace)
                         }
@@ -336,7 +359,7 @@ struct CaptureOverlayView: View {
             manager.currentLoc = NSEvent.mouseLocation
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .leftMouseDown, .leftMouseUp, .keyDown]) { event in
                 if event.type == .keyDown && event.keyCode == 53 {
-                    onCancel()
+                    closeWithAnimation()
                     return nil
                 }
                 
