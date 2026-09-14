@@ -311,7 +311,6 @@ struct CaptureOverlayView: View {
             }
             .ignoresSafeArea(.all, edges: [.bottom, .leading, .trailing])
             .allowsHitTesting(false)
-            .opacity(manager.isCapturing ? 0 : 1)
             
             let r = manager.rect
             
@@ -339,7 +338,7 @@ struct CaptureOverlayView: View {
                     .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
             }
             .position(x: r.midX, y: r.midY)
-            .opacity(manager.isCapturing ? 0 : (manager.isHoveringClose ? 0 : 1))
+            .opacity(manager.isProcessing ? 0 : (manager.isHoveringClose ? 0 : 1))
             
             // Dynamic Glass Island Drop
             VStack {
@@ -384,7 +383,7 @@ struct CaptureOverlayView: View {
                 .padding(.top, 0)
                 Spacer()
             }
-            .opacity(manager.isCapturing ? 0 : 1)
+            .opacity(manager.isProcessing ? 0 : 1)
             
             if manager.isProcessing {
                 let dynamicRadius = min(16, min(r.width / 4, r.height / 4))
@@ -507,12 +506,8 @@ class LensScraper: ObservableObject {
         let overlayView = CaptureOverlayView(manager: manager, onCapture: { [weak self] rect in
             DispatchQueue.main.async {
                 manager.unhideCursor()
-                manager.isCapturing = true // Hides the UI so screencapture is clean
-                
-                // Allow UI to disappear before capturing
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    self?.executeScreencapture(rect: rect, manager: manager)
-                }
+                manager.isCapturing = true // State flag
+                self?.executeScreencapture(rect: rect, manager: manager)
             }
         }, onCancel: { [weak self] in
             DispatchQueue.main.async {
@@ -528,6 +523,7 @@ class LensScraper: ObservableObject {
         captureWindow?.backgroundColor = .clear
         captureWindow?.isOpaque = false
         captureWindow?.hasShadow = false
+        captureWindow?.sharingType = .none
         captureWindow?.acceptsMouseMovedEvents = true
         captureWindow?.contentView = NSHostingView(rootView: overlayView)
         captureWindow?.makeKeyAndOrderFront(nil)
