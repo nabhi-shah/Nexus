@@ -147,21 +147,21 @@ struct GlassMenuButton: View {
                     Image(icon) // Uses custom Phosphor SVGs from Asset Catalog
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 24, height: 24)
+                        .frame(width: 20, height: 20)
                         .foregroundColor(isCloseButton ? .white : .white)
                         .transition(.opacity.animation(.easeInOut(duration: 0.3)))
                 }
             }
-            .frame(width: 56, height: 56)
+            .frame(width: 44, height: 44)
         }
         .buttonStyle(PlainButtonStyle())
         .glassEffect(
             .regular.tint(
                 isBlackDot ? .black : (isCloseButton ? .red.opacity(0.8) : .white.opacity(isHovering ? 0.2 : 0.1))
             ),
-            in: .circle
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
-        .overlay(Circle().stroke(isBlackDot ? Color.clear : Color.white.opacity(0.3), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(isBlackDot ? Color.clear : Color.white.opacity(0.3), lineWidth: 1))
         .shadow(color: isBlackDot ? .clear : .black.opacity(0.2), radius: 5)
         .focusable(false)
         .onHover { hovering in
@@ -254,11 +254,11 @@ struct CaptureOverlayView: View {
                         // The moving group that falls and expands
                         ZStack {
                             GlassMenuButton(icon: "phosphor_search", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? -148 : 0)
+                                .offset(x: buttonsExpanded ? -116 : 0)
                                 .glassEffectID("search", in: glassSpace)
                             
                             GlassMenuButton(icon: "phosphor_music-notes", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? -74 : 0)
+                                .offset(x: buttonsExpanded ? -58 : 0)
                                 .glassEffectID("music", in: glassSpace)
                             
                             GlassMenuButton(
@@ -274,11 +274,11 @@ struct CaptureOverlayView: View {
                             .glassEffectID("center", in: glassSpace)
                             
                             GlassMenuButton(icon: "phosphor_cursor-text", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? 74 : 0)
+                                .offset(x: buttonsExpanded ? 58 : 0)
                                 .glassEffectID("text", in: glassSpace)
                             
                             GlassMenuButton(icon: "phosphor_x", action: { onCancel() }, manager: manager, isCloseButton: true, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? 148 : 0)
+                                .offset(x: buttonsExpanded ? 116 : 0)
                                 .glassEffectID("close", in: glassSpace)
                         }
                         .offset(y: dropYOffset)
