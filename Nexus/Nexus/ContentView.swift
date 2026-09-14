@@ -131,6 +131,39 @@ class CaptureManager: ObservableObject {
     }
 }
 
+struct GooeyBackground: View {
+    var expanded: Bool
+    var dropYOffset: CGFloat
+    
+    var body: some View {
+        Canvas { context, size in
+            context.addFilter(.alphaThreshold(min: 0.5, color: .black))
+            context.addFilter(.blur(radius: 12))
+            
+            context.drawLayer { ctx in
+                for i in 0..<6 {
+                    if let resolved = context.resolveSymbol(id: i) {
+                        ctx.draw(resolved, at: CGPoint(x: size.width / 2, y: 22)) // Center of 44pt height view in top-aligned ZStack
+                    }
+                }
+            }
+        } symbols: {
+            // Anchor (fixed at the top notch)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .frame(width: 80, height: 40)
+                .offset(y: -20)
+                .tag(0)
+            
+            // Dots (move with dropYOffset)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -116 : 0, y: dropYOffset).tag(1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -58 : 0, y: dropYOffset).tag(2)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(y: dropYOffset).tag(3)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 58 : 0, y: dropYOffset).tag(4)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 116 : 0, y: dropYOffset).tag(5)
+        }
+    }
+}
+
 struct GlassMenuButton: View {
     var icon: String
     var action: () -> Void
@@ -157,7 +190,7 @@ struct GlassMenuButton: View {
         .buttonStyle(PlainButtonStyle())
         .glassEffect(
             .regular.tint(
-                isBlackDot ? .black : (isCloseButton ? .red.opacity(0.8) : .white.opacity(isHovering ? 0.2 : 0.1))
+                isBlackDot ? .black : (isCloseButton ? .red.opacity(0.5) : .white.opacity(isHovering ? 0.2 : 0.1))
             ),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
@@ -243,15 +276,12 @@ struct CaptureOverlayView: View {
             
             // Dynamic Glass Island Drop
             VStack {
-                GlassEffectContainer(spacing: 12) { // 12pt threshold ensures they stay close but don't join
-                    ZStack {
-                        // The anchor dot inside the notch (ensures a gooey tear-off effect)
-                        Color.clear
-                            .frame(width: 80, height: 40)
-                            .glassEffect(.regular.tint(.black), in: .rect(cornerRadius: 20))
-                            .offset(y: -20)
-                        
-                        // The moving group that falls and expands
+                ZStack(alignment: .top) { // Align to top so y:0 in Canvas is top of ZStack
+                    GooeyBackground(expanded: buttonsExpanded, dropYOffset: dropYOffset)
+                        .frame(width: 400, height: 200)
+                        .opacity(buttonsExpanded ? 0 : 1) // Crossfade out as it expands
+                    
+                    GlassEffectContainer(spacing: 12) {
                         ZStack {
                             GlassMenuButton(icon: "phosphor_search", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
                                 .offset(x: buttonsExpanded ? -116 : 0)
