@@ -144,18 +144,16 @@ struct CaptureOverlayView: View {
             
             // Navy Blue Gradient Overlay with Blur
             VStack(spacing: 0) {
-                Rectangle()
-                    .fill(Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.6))
-                    .background(.ultraThinMaterial)
+                Color.clear
+                    .glassEffect(.regular.tint(Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.6)), in: .rect)
                     .mask(
                         LinearGradient(gradient: Gradient(colors: [.black, .clear]), startPoint: .top, endPoint: .bottom)
                     )
                     .frame(height: 200)
                     .offset(y: isVisible ? 0 : -200)
                 Spacer()
-                Rectangle()
-                    .fill(Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.6))
-                    .background(.ultraThinMaterial)
+                Color.clear
+                    .glassEffect(.regular.tint(Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.6)), in: .rect)
                     .mask(
                         LinearGradient(gradient: Gradient(colors: [.clear, .black]), startPoint: .top, endPoint: .bottom)
                     )
@@ -204,10 +202,8 @@ struct CaptureOverlayView: View {
                             .foregroundColor(.white)
                             .padding(16)
                             .background(
-                                Circle()
-                                    .fill(Color.white.opacity(0.1))
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Circle())
+                                Color.clear
+                                    .glassEffect(.regular.tint(.white.opacity(0.1)), in: .circle)
                                     .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
                             )
                             .shadow(color: .black.opacity(0.2), radius: 5)
