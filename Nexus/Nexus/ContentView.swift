@@ -131,12 +131,50 @@ class CaptureManager: ObservableObject {
     }
 }
 
+struct GlassMenuButton: View {
+    var icon: String
+    var action: () -> Void
+    var manager: CaptureManager
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 56, height: 56)
+                .background(
+                    Color.clear
+                        .glassEffect(.regular.tint(.white.opacity(isHovering ? 0.2 : 0.1)), in: .circle)
+                        .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
+                )
+                .shadow(color: .black.opacity(0.2), radius: 5)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .focusable(false)
+        .onHover { hovering in
+            isHovering = hovering
+            manager.isHoveringClose = hovering
+            if hovering {
+                manager.unhideCursor()
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+                manager.hideCursor()
+            }
+        }
+    }
+}
+
 struct CaptureOverlayView: View {
     @ObservedObject var manager: CaptureManager
     var onCapture: (CGRect) -> Void
     var onCancel: () -> Void
     @State private var eventMonitor: Any?
     @State private var isVisible = false
+    @State private var buttonsExpanded = false
+    @State private var dropYOffset: CGFloat = -100
+    @Namespace private var glassSpace
     
     var body: some View {
         ZStack {
@@ -191,37 +229,40 @@ struct CaptureOverlayView: View {
             .position(x: r.midX, y: r.midY)
             .opacity(manager.isHoveringClose ? 0 : 1)
             
+            // Dynamic Glass Island Drop
             VStack {
-                HStack {
-                    Spacer()
-                    Button(action: {
-                        onCancel()
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(16)
-                            .background(
-                                Color.clear
-                                    .glassEffect(.regular.tint(.white.opacity(0.1)), in: .circle)
-                                    .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
-                            )
-                            .shadow(color: .black.opacity(0.2), radius: 5)
-                            .padding(30)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .focusable(false)
-                    .onHover { hovering in
-                        manager.isHoveringClose = hovering
-                        if hovering {
-                            manager.unhideCursor()
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                            manager.hideCursor()
+                GlassEffectContainer(spacing: 30) {
+                    ZStack {
+                        if buttonsExpanded {
+                            GlassMenuButton(icon: "magnifyingglass", action: {}, manager: manager)
+                                .offset(x: -140)
+                                .glassEffectID("search", in: glassSpace)
+                            
+                            GlassMenuButton(icon: "music.note", action: {}, manager: manager)
+                                .offset(x: -70)
+                                .glassEffectID("music", in: glassSpace)
+                        }
+                        
+                        GlassMenuButton(icon: buttonsExpanded ? "translate" : "chevron.down", action: {
+                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                buttonsExpanded.toggle()
+                            }
+                        }, manager: manager)
+                        .glassEffectID("center", in: glassSpace)
+                        
+                        if buttonsExpanded {
+                            GlassMenuButton(icon: "text.viewfinder", action: {}, manager: manager)
+                                .offset(x: 70)
+                                .glassEffectID("text", in: glassSpace)
+                            
+                            GlassMenuButton(icon: "xmark", action: { onCancel() }, manager: manager)
+                                .offset(x: 140)
+                                .glassEffectID("close", in: glassSpace)
                         }
                     }
                 }
+                .padding(.top, 20)
+                .offset(y: dropYOffset)
                 Spacer()
             }
         }
@@ -229,6 +270,15 @@ struct CaptureOverlayView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 withAnimation(.easeOut(duration: 0.4)) {
                     isVisible = true
+                }
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                    dropYOffset = 10
+                }
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                    buttonsExpanded = true
                 }
             }
             manager.currentLoc = NSEvent.mouseLocation
