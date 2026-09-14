@@ -311,6 +311,7 @@ struct CaptureOverlayView: View {
             }
             .ignoresSafeArea(.all, edges: [.bottom, .leading, .trailing])
             .allowsHitTesting(false)
+            .opacity(manager.isProcessing ? 0 : 1)
             
             let r = manager.rect
             
@@ -542,7 +543,10 @@ class LensScraper: ObservableObject {
                 DispatchQueue.main.async {
                     // Transition to loading UI
                     manager.isCapturing = false
-                    manager.isProcessing = true
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        manager.isProcessing = true
+                    }
+                    self?.captureWindow?.ignoresMouseEvents = true
                     
                     if self?.useMockData == true {
                         try? FileManager.default.removeItem(atPath: tempFilePath)
