@@ -135,19 +135,34 @@ struct GlassMenuButton: View {
     var icon: String
     var action: () -> Void
     var manager: CaptureManager
+    var isCloseButton: Bool = false
+    var isBlackDot: Bool = false
+    
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 56, height: 56)
+            ZStack {
+                if !isBlackDot {
+                    Image(icon) // Uses custom Phosphor SVGs from Asset Catalog
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 24, height: 24)
+                        .foregroundColor(isCloseButton ? .white : .white)
+                        .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+                }
+            }
+            .frame(width: 56, height: 56)
         }
         .buttonStyle(PlainButtonStyle())
-        .glassEffect(.regular.tint(.white.opacity(isHovering ? 0.2 : 0.1)), in: .circle)
-        .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
-        .shadow(color: .black.opacity(0.2), radius: 5)
+        .glassEffect(
+            .regular.tint(
+                isBlackDot ? .black : (isCloseButton ? .red.opacity(0.8) : .white.opacity(isHovering ? 0.2 : 0.1))
+            ),
+            in: .circle
+        )
+        .overlay(Circle().stroke(isBlackDot ? Color.clear : Color.white.opacity(0.3), lineWidth: 1))
+        .shadow(color: isBlackDot ? .clear : .black.opacity(0.2), radius: 5)
         .focusable(false)
         .onHover { hovering in
             isHovering = hovering
@@ -170,7 +185,7 @@ struct CaptureOverlayView: View {
     @State private var eventMonitor: Any?
     @State private var isVisible = false
     @State private var buttonsExpanded = false
-    @State private var dropYOffset: CGFloat = -100
+    @State private var dropYOffset: CGFloat = -20
     @Namespace private var glassSpace
     
     var body: some View {
@@ -228,38 +243,52 @@ struct CaptureOverlayView: View {
             
             // Dynamic Glass Island Drop
             VStack {
-                GlassEffectContainer(spacing: 30) {
+                GlassEffectContainer(spacing: 12) { // 12pt threshold ensures they stay close but don't join
                     ZStack {
-                        if buttonsExpanded {
-                            GlassMenuButton(icon: "magnifyingglass", action: {}, manager: manager)
-                                .offset(x: -180)
-                                .glassEffectID("search", in: glassSpace)
-                            
-                            GlassMenuButton(icon: "music.note", action: {}, manager: manager)
-                                .offset(x: -90)
-                                .glassEffectID("music", in: glassSpace)
-                        }
+                        // The anchor dot inside the notch (ensures a gooey tear-off effect)
+                        Color.clear
+                            .frame(width: 80, height: 40)
+                            .glassEffect(.regular.tint(.black), in: .rect(cornerRadius: 20))
+                            .offset(y: -20)
                         
-                        GlassMenuButton(icon: buttonsExpanded ? "translate" : "chevron.down", action: {
-                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                                buttonsExpanded.toggle()
+                        // The moving group that falls and expands
+                        ZStack {
+                            if buttonsExpanded {
+                                GlassMenuButton(icon: "phosphor_search", action: {}, manager: manager)
+                                    .offset(x: -148)
+                                    .glassEffectID("search", in: glassSpace)
+                                
+                                GlassMenuButton(icon: "phosphor_music-notes", action: {}, manager: manager)
+                                    .offset(x: -74)
+                                    .glassEffectID("music", in: glassSpace)
                             }
-                        }, manager: manager)
-                        .glassEffectID("center", in: glassSpace)
-                        
-                        if buttonsExpanded {
-                            GlassMenuButton(icon: "text.viewfinder", action: {}, manager: manager)
-                                .offset(x: 90)
-                                .glassEffectID("text", in: glassSpace)
                             
-                            GlassMenuButton(icon: "xmark", action: { onCancel() }, manager: manager)
-                                .offset(x: 180)
-                                .glassEffectID("close", in: glassSpace)
+                            GlassMenuButton(
+                                icon: "phosphor_translate",
+                                action: {
+                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                        buttonsExpanded.toggle()
+                                    }
+                                },
+                                manager: manager,
+                                isBlackDot: !buttonsExpanded
+                            )
+                            .glassEffectID("center", in: glassSpace)
+                            
+                            if buttonsExpanded {
+                                GlassMenuButton(icon: "phosphor_cursor-text", action: {}, manager: manager)
+                                    .offset(x: 74)
+                                    .glassEffectID("text", in: glassSpace)
+                                
+                                GlassMenuButton(icon: "phosphor_x", action: { onCancel() }, manager: manager, isCloseButton: true)
+                                    .offset(x: 148)
+                                    .glassEffectID("close", in: glassSpace)
+                            }
                         }
+                        .offset(y: dropYOffset)
                     }
                 }
-                .padding(.top, 20)
-                .offset(y: dropYOffset)
+                .padding(.top, 0)
                 Spacer()
             }
         }
@@ -269,11 +298,11 @@ struct CaptureOverlayView: View {
                     isVisible = true
                 }
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
-                    dropYOffset = 50
+                    dropYOffset = 60
                 }
             }
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
                     buttonsExpanded = true
                 }
