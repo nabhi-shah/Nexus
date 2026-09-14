@@ -143,14 +143,11 @@ struct GlassMenuButton: View {
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(.white)
                 .frame(width: 56, height: 56)
-                .background(
-                    Color.clear
-                        .glassEffect(.regular.tint(.white.opacity(isHovering ? 0.2 : 0.1)), in: .circle)
-                        .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
-                )
-                .shadow(color: .black.opacity(0.2), radius: 5)
         }
         .buttonStyle(PlainButtonStyle())
+        .glassEffect(.regular.tint(.white.opacity(isHovering ? 0.2 : 0.1)), in: .circle)
+        .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
+        .shadow(color: .black.opacity(0.2), radius: 5)
         .focusable(false)
         .onHover { hovering in
             isHovering = hovering
@@ -235,11 +232,11 @@ struct CaptureOverlayView: View {
                     ZStack {
                         if buttonsExpanded {
                             GlassMenuButton(icon: "magnifyingglass", action: {}, manager: manager)
-                                .offset(x: -140)
+                                .offset(x: -180)
                                 .glassEffectID("search", in: glassSpace)
                             
                             GlassMenuButton(icon: "music.note", action: {}, manager: manager)
-                                .offset(x: -70)
+                                .offset(x: -90)
                                 .glassEffectID("music", in: glassSpace)
                         }
                         
@@ -252,11 +249,11 @@ struct CaptureOverlayView: View {
                         
                         if buttonsExpanded {
                             GlassMenuButton(icon: "text.viewfinder", action: {}, manager: manager)
-                                .offset(x: 70)
+                                .offset(x: 90)
                                 .glassEffectID("text", in: glassSpace)
                             
                             GlassMenuButton(icon: "xmark", action: { onCancel() }, manager: manager)
-                                .offset(x: 140)
+                                .offset(x: 180)
                                 .glassEffectID("close", in: glassSpace)
                         }
                     }
@@ -272,7 +269,7 @@ struct CaptureOverlayView: View {
                     isVisible = true
                 }
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
-                    dropYOffset = 10
+                    dropYOffset = 50
                 }
             }
             
