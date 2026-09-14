@@ -71,6 +71,8 @@ class CaptureManager: ObservableObject {
     @Published var currentLoc: CGPoint = .zero
     @Published var isDragging = false
     @Published var isHoveringClose = false
+    @Published var isCapturing = false
+    @Published var isProcessing = false
     
     var isCursorHidden = false
     
@@ -211,6 +213,47 @@ struct GlassMenuButton: View {
     }
 }
 
+struct BorderBeamView: View {
+    var beamColor: Color = .cyan
+    var duration: Double = 4.0
+    var lineWidth: CGFloat = 2.0
+    var cornerRadius: CGFloat = 16.0
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            let angle = (time / duration).truncatingRemainder(dividingBy: 1.0) * 360.0
+
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .stroke(
+                    AngularGradient(
+                        gradient: Gradient(colors: [.clear, beamColor, .clear]),
+                        center: .center,
+                        startAngle: .degrees(angle),
+                        endAngle: .degrees(angle + 90)
+                    ),
+                    lineWidth: lineWidth
+                )
+        }
+    }
+}
+
+struct FlashOverlay: View {
+    var rect: CGRect
+    @State private var flashOpacity = 0.8
+    var body: some View {
+        Color.white
+            .opacity(flashOpacity)
+            .frame(width: rect.width, height: rect.height)
+            .position(x: rect.midX, y: rect.midY)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    flashOpacity = 0.0
+                }
+            }
+    }
+}
+
 struct CaptureOverlayView: View {
     @ObservedObject var manager: CaptureManager
     var onCapture: (CGRect) -> Void
@@ -268,6 +311,7 @@ struct CaptureOverlayView: View {
             }
             .ignoresSafeArea(.all, edges: [.bottom, .leading, .trailing])
             .allowsHitTesting(false)
+            .opacity(manager.isCapturing ? 0 : 1)
             
             let r = manager.rect
             
@@ -295,14 +339,14 @@ struct CaptureOverlayView: View {
                     .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
             }
             .position(x: r.midX, y: r.midY)
-            .opacity(manager.isHoveringClose ? 0 : 1)
+            .opacity(manager.isCapturing ? 0 : (manager.isHoveringClose ? 0 : 1))
             
             // Dynamic Glass Island Drop
             VStack {
-                ZStack(alignment: .top) { // Align to top so y:0 in Canvas is top of ZStack
+                ZStack(alignment: .top) {
                     GooeyBackground(expanded: buttonsExpanded, dropYOffset: dropYOffset)
                         .frame(width: 400, height: 200)
-                        .opacity(buttonsExpanded ? 0 : 1) // Crossfade out as it expands
+                        .opacity(buttonsExpanded ? 0 : 1)
                     
                     GlassEffectContainer(spacing: 12) {
                         ZStack {
@@ -339,6 +383,16 @@ struct CaptureOverlayView: View {
                 }
                 .padding(.top, 0)
                 Spacer()
+            }
+            .opacity(manager.isCapturing ? 0 : 1)
+            
+            if manager.isProcessing {
+                let dynamicRadius = min(16, min(r.width / 4, r.height / 4))
+                BorderBeamView(beamColor: Color(red: 0.05, green: 0.1, blue: 0.5), duration: 2.0, lineWidth: 4.0, cornerRadius: dynamicRadius)
+                    .frame(width: r.width, height: r.height)
+                    .position(x: r.midX, y: r.midY)
+                
+                FlashOverlay(rect: r)
             }
         }
         .onAppear {
@@ -409,7 +463,17 @@ struct CaptureOverlayView: View {
 class LensScraper: ObservableObject {
     @Published var matches: [VisualMatch] = []
     @Published var overview: String = ""
-    @Published var isScraping: Bool = false
+    @Published var isScraping: Bool = false {
+        didSet {
+            if !isScraping {
+                DispatchQueue.main.async {
+                    self.closeCaptureWindow()
+                    self.mainWindow?.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
+        }
+    }
     @Published var statusText: String = ""
     
     let useMockData: Bool = true
@@ -419,6 +483,11 @@ class LensScraper: ObservableObject {
     var captureWindow: NSWindow?
     var eventMonitor: Any?
     var mainWindow: NSWindow?
+    
+    private func closeCaptureWindow() {
+        captureWindow?.orderOut(nil)
+        captureWindow = nil
+    }
     
     func startCapture() {
         DispatchQueue.main.async {
@@ -437,24 +506,20 @@ class LensScraper: ObservableObject {
         
         let overlayView = CaptureOverlayView(manager: manager, onCapture: { [weak self] rect in
             DispatchQueue.main.async {
-                manager.isFinished = true
-                self?.captureWindow?.orderOut(nil)
-                self?.captureWindow = nil
                 manager.unhideCursor()
+                manager.isCapturing = true // Hides the UI so screencapture is clean
                 
-                // Allow window to disappear before capturing
+                // Allow UI to disappear before capturing
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    self?.executeScreencapture(rect: rect)
+                    self?.executeScreencapture(rect: rect, manager: manager)
                 }
             }
         }, onCancel: { [weak self] in
             DispatchQueue.main.async {
                 manager.isFinished = true
-                self?.captureWindow?.orderOut(nil)
-                self?.captureWindow = nil
                 manager.unhideCursor()
-                self?.isScraping = false
                 self?.statusText = "Capture cancelled."
+                self?.isScraping = false
             }
         })
         
@@ -469,7 +534,7 @@ class LensScraper: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
     }
     
-    private func executeScreencapture(rect: CGRect) {
+    private func executeScreencapture(rect: CGRect, manager: CaptureManager) {
         let tempFilePath = NSTemporaryDirectory().appending("nexus_temp.png")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
@@ -479,13 +544,16 @@ class LensScraper: ObservableObject {
             try process.run()
             process.terminationHandler = { [weak self] _ in
                 DispatchQueue.main.async {
-                    // Show the main window again once the capture is complete
-                    self?.mainWindow?.makeKeyAndOrderFront(nil)
-                    NSApp.activate(ignoringOtherApps: true)
+                    // Transition to loading UI
+                    manager.isCapturing = false
+                    manager.isProcessing = true
                     
                     if self?.useMockData == true {
                         try? FileManager.default.removeItem(atPath: tempFilePath)
-                        self?.loadMockData()
+                        // Delay slightly to show the animation
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            self?.loadMockData()
+                        }
                     } else {
                         self?.uploadToSerpApi(filePath: tempFilePath)
                     }
@@ -493,7 +561,6 @@ class LensScraper: ObservableObject {
             }
         } catch {
             DispatchQueue.main.async {
-                self.mainWindow?.makeKeyAndOrderFront(nil)
                 self.statusText = "Capture failed: \(error.localizedDescription)"
                 self.isScraping = false
             }
