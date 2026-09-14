@@ -136,18 +136,31 @@ struct CaptureOverlayView: View {
     var onCapture: (CGRect) -> Void
     var onCancel: () -> Void
     @State private var eventMonitor: Any?
+    @State private var isVisible = false
     
     var body: some View {
         ZStack {
             Color.clear.ignoresSafeArea()
             
-            // Gradient Overlay
+            // Navy Blue Gradient Overlay with Blur
             VStack(spacing: 0) {
-                LinearGradient(gradient: Gradient(colors: [Color.black.opacity(0.7), Color.clear]), startPoint: .top, endPoint: .bottom)
+                Rectangle()
+                    .fill(Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.6))
+                    .background(.ultraThinMaterial)
+                    .mask(
+                        LinearGradient(gradient: Gradient(colors: [.black, .clear]), startPoint: .top, endPoint: .bottom)
+                    )
                     .frame(height: 200)
+                    .offset(y: isVisible ? 0 : -200)
                 Spacer()
-                LinearGradient(gradient: Gradient(colors: [Color.clear, Color.black.opacity(0.7)]), startPoint: .top, endPoint: .bottom)
+                Rectangle()
+                    .fill(Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.6))
+                    .background(.ultraThinMaterial)
+                    .mask(
+                        LinearGradient(gradient: Gradient(colors: [.clear, .black]), startPoint: .top, endPoint: .bottom)
+                    )
                     .frame(height: 200)
+                    .offset(y: isVisible ? 0 : 200)
             }
             .ignoresSafeArea()
             .allowsHitTesting(false)
@@ -186,11 +199,18 @@ struct CaptureOverlayView: View {
                     Button(action: {
                         onCancel()
                     }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 40))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundColor(.white)
-                            .background(Color.black.opacity(0.5))
-                            .clipShape(Circle())
+                            .padding(16)
+                            .background(
+                                Circle()
+                                    .fill(Color.white.opacity(0.1))
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(Circle())
+                                    .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
+                            )
+                            .shadow(color: .black.opacity(0.2), radius: 5)
                             .padding(30)
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -209,6 +229,9 @@ struct CaptureOverlayView: View {
             }
         }
         .onAppear {
+            withAnimation(.easeOut(duration: 0.4)) {
+                isVisible = true
+            }
             manager.currentLoc = NSEvent.mouseLocation
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .leftMouseDown, .leftMouseUp, .keyDown]) { event in
                 if event.type == .keyDown && event.keyCode == 53 {
