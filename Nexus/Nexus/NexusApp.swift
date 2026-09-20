@@ -183,7 +183,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         func showTextEditOverlay() {
         if textEditWindow == nil {
             // Make a window large enough to accommodate vertical expansion
-            let window = CaptureWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
+            let window = CaptureWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 44), styleMask: [.borderless], backing: .buffered, defer: false)
             window.level = .floating
             window.backgroundColor = .clear
             window.isOpaque = false
@@ -200,11 +200,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Position window globally!
         let manager = TextEditManager.shared
         let winWidth: CGFloat = 400
-        let winHeight: CGFloat = 300
+        let winHeight: CGFloat = 44
         
         // Target coordinates
         var originX = manager.menuPosition.x - (winWidth / 2)
-        var originY = manager.menuPosition.y - 226
+        var originY = manager.menuPosition.y + 10
         
         // Clamp to screen bounds
         let screens = NSScreen.screens
@@ -218,11 +218,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 originX = screenFrame.maxX - winWidth - 10
             }
             
-            // Clamp Y
+            // Smart Y Flipping
+            // By default, it's above the text. If it goes off the top of the screen:
+            if originY + winHeight > screenFrame.maxY {
+                // Flip it to be BELOW the text
+                // Estimate text height as 30, plus 10px padding
+                originY = manager.menuPosition.y - 40 - winHeight
+            }
+            
+            // If it goes off the bottom of the screen (e.g. if flipped, or text is near bottom)
             if originY < screenFrame.minY {
                 originY = screenFrame.minY + 10
-            } else if originY + winHeight > screenFrame.maxY {
-                originY = screenFrame.maxY - winHeight - 10
             }
         }
         

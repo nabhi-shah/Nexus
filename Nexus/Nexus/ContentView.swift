@@ -1619,7 +1619,7 @@ struct TextEditOverlayView: View {
     
     var body: some View {
         ZStack(alignment: .top) {
-            Color.clear.frame(width: 400, height: 300)
+            
             // Removed Color.clear to allow clicks to pass through
             
             VStack {
@@ -1736,14 +1736,13 @@ struct TextEditOverlayView: View {
                             }
                         }
                     }
-                    .offset(y: dropYOffset)
                     .scaleEffect(buttonsExpanded ? 1.0 : 0.01, anchor: .bottom)
                     .opacity(buttonsExpanded ? 1.0 : 0.0)
                     
                     if manager.isProcessing {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .offset(y: dropYOffset + 60)
+                            .padding(.top, 20)
                     }
                     
                     if !manager.errorMessage.isEmpty {
@@ -1752,7 +1751,7 @@ struct TextEditOverlayView: View {
                             .padding(8)
                             .background(Color.black.opacity(0.7))
                             .cornerRadius(8)
-                            .offset(y: dropYOffset + 60)
+                            .padding(.top, 20)
                     }
                 }
             }
