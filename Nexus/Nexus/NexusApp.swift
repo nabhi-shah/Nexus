@@ -115,34 +115,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         let screenHeight = NSScreen.main?.frame.height ?? 800
                         let mousePos = NSEvent.mouseLocation
                         
-                        if let element = manager.currentElement {
-                            // 1. Try Cursor Bounds (fastest, exact for typing or small selections)
-                            if let cursorPos = manager.getCursorPosition(element: element) {
-                                manager.menuPosition = CGPoint(x: cursorPos.x, y: screenHeight - cursorPos.y)
-                                delegate.showTextEditOverlay()
-                            // 2. Try Highlight Pixels (perfect for large text selections)
-                            } else if manager.wasTextSelected, let highlightPos = manager.findHighlightPosition(element: element, screenHeight: screenHeight) {
-                                manager.menuPosition = highlightPos
-                                delegate.showTextEditOverlay()
-                            // 3. Fallback to OCR (if APIs and pixels fail)
-                            } else if let text = manager.extractedText, !text.isEmpty {
-                                Task {
-                                    let apiKey = "apikey_22513b59699a87844a2f96237441919e2e32_14fcdb742ae45567eef64cd0248e8c2e59a2a53537709c5099a04e3012ab5981"
-                                    if let newPos = await manager.identifyMenuPositionWithJev(apiKey: apiKey, fullText: text, element: element, screenHeight: screenHeight) {
-                                        DispatchQueue.main.async {
-                                            manager.menuPosition = CGPoint(x: newPos.x, y: screenHeight - newPos.y)
-                                            delegate.showTextEditOverlay()
-                                        }
-                                    } else {
-                                        DispatchQueue.main.async {
-                                            manager.menuPosition = mousePos
-                                            delegate.showTextEditOverlay()
-                                        }
+                        let element = manager.currentElement
+                        
+                        // 1. Try Cursor Bounds (only if we have an element)
+                        if let element = element, let cursorPos = manager.getCursorPosition(element: element) {
+                            manager.menuPosition = CGPoint(x: cursorPos.x, y: screenHeight - cursorPos.y)
+                            delegate.showTextEditOverlay()
+                        // 2. Try Highlight Pixels (perfect for large text selections, handles nil element by scanning full screen)
+                        } else if manager.wasTextSelected, let highlightPos = manager.findHighlightPosition(element: element, screenHeight: screenHeight) {
+                            manager.menuPosition = highlightPos
+                            delegate.showTextEditOverlay()
+                        // 3. Fallback to OCR (if APIs and pixels fail, handles nil element by scanning full screen)
+                        } else if let text = manager.extractedText, !text.isEmpty {
+                            Task {
+                                let apiKey = "apikey_22513b59699a87844a2f96237441919e2e32_14fcdb742ae45567eef64cd0248e8c2e59a2a53537709c5099a04e3012ab5981"
+                                if let newPos = await manager.identifyMenuPositionWithJev(apiKey: apiKey, fullText: text, element: element, screenHeight: screenHeight) {
+                                    DispatchQueue.main.async {
+                                        manager.menuPosition = CGPoint(x: newPos.x, y: screenHeight - newPos.y)
+                                        delegate.showTextEditOverlay()
+                                    }
+                                } else {
+                                    DispatchQueue.main.async {
+                                        manager.menuPosition = mousePos
+                                        delegate.showTextEditOverlay()
                                     }
                                 }
-                            } else {
-                                manager.menuPosition = mousePos
-                                delegate.showTextEditOverlay()
                             }
                         } else {
                             manager.menuPosition = mousePos

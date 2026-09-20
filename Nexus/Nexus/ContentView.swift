@@ -1188,7 +1188,7 @@ class TextEditManager: ObservableObject {
 
 
 
-    func findHighlightPosition(element: AXUIElement, screenHeight: CGFloat) -> CGPoint? {
+    func findHighlightPosition(element: AXUIElement?, screenHeight: CGFloat) -> CGPoint? {
         func log(_ msg: String) {
             let path = "/tmp/nexus_debug.txt"
             if let fileHandle = FileHandle(forWritingAtPath: path) {
@@ -1208,30 +1208,32 @@ class TextEditManager: ObservableObject {
         var usingFallbackBounds = false
         
         // 1. Try to get exact input element bounds
-        let posErr = AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef)
-        let sizeErr = AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef)
-        
-        if posErr == .success && sizeErr == .success,
-           let axPos = posRef as! AXValue?, let axSize = sizeRef as! AXValue? {
-            AXValueGetValue(axPos, .cgPoint, &elementPos)
-            AXValueGetValue(axSize, .cgSize, &elementSize)
-        } 
-        
-        // 2. If it failed, or size is suspicious (e.g. 0x0), try to get the parent Window bounds!
-        if elementSize.width <= 0 || elementSize.height <= 0 {
-            log("Input box bounds unavailable. Falling back to Window bounds.")
-            usingFallbackBounds = true
+        if let element = element {
+            let posErr = AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef)
+            let sizeErr = AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef)
             
-            var windowRef: CFTypeRef?
-            if AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &windowRef) == .success,
-               let windowElement = windowRef as! AXUIElement? {
-                let wPosErr = AXUIElementCopyAttributeValue(windowElement, kAXPositionAttribute as CFString, &posRef)
-                let wSizeErr = AXUIElementCopyAttributeValue(windowElement, kAXSizeAttribute as CFString, &sizeRef)
+            if posErr == .success && sizeErr == .success,
+               let axPos = posRef as! AXValue?, let axSize = sizeRef as! AXValue? {
+                AXValueGetValue(axPos, .cgPoint, &elementPos)
+                AXValueGetValue(axSize, .cgSize, &elementSize)
+            } 
+            
+            // 2. If it failed, or size is suspicious (e.g. 0x0), try to get the parent Window bounds!
+            if elementSize.width <= 0 || elementSize.height <= 0 {
+                log("Input box bounds unavailable. Falling back to Window bounds.")
+                usingFallbackBounds = true
                 
-                if wPosErr == .success && wSizeErr == .success,
-                   let axPos = posRef as! AXValue?, let axSize = sizeRef as! AXValue? {
-                    AXValueGetValue(axPos, .cgPoint, &elementPos)
-                    AXValueGetValue(axSize, .cgSize, &elementSize)
+                var windowRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &windowRef) == .success,
+                   let windowElement = windowRef as! AXUIElement? {
+                    let wPosErr = AXUIElementCopyAttributeValue(windowElement, kAXPositionAttribute as CFString, &posRef)
+                    let wSizeErr = AXUIElementCopyAttributeValue(windowElement, kAXSizeAttribute as CFString, &sizeRef)
+                    
+                    if wPosErr == .success && wSizeErr == .success,
+                       let axPos = posRef as! AXValue?, let axSize = sizeRef as! AXValue? {
+                        AXValueGetValue(axPos, .cgPoint, &elementPos)
+                        AXValueGetValue(axSize, .cgSize, &elementSize)
+                    }
                 }
             }
         }
