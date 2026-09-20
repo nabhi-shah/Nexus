@@ -1408,14 +1408,20 @@ class TextEditManager: ObservableObject {
                         let cleanTarget = targetText.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
                         log("Clean target text: \(cleanTarget)")
                         
+                        var minX: CGFloat = 99999
+                        var maxX: CGFloat = 0
+                        var minY: CGFloat = 99999
+                        var maxY: CGFloat = 0
+                        var foundAny = false
+                        
                         for obs in results {
                             if let topCandidate = obs.topCandidates(1).first {
                                 let ocrText = topCandidate.string.lowercased()
                                 let cleanOcr = ocrText.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
                                 
                                 let isMatch = (!cleanOcr.isEmpty && !cleanTarget.isEmpty) && 
-                                              ((cleanOcr.count >= 3 && cleanTarget.contains(cleanOcr)) || 
-                                               (cleanTarget.count >= 3 && cleanOcr.contains(cleanTarget)) || 
+                                              ((cleanOcr.count >= 5 && cleanTarget.contains(cleanOcr)) || 
+                                               (cleanTarget.count >= 5 && cleanOcr.contains(cleanTarget)) || 
                                                cleanOcr == cleanTarget)
                                 
                                 if isMatch {
@@ -1424,17 +1430,27 @@ class TextEditManager: ObservableObject {
                                     let pixelX = visionBBox.origin.x * elementSize.width
                                     let pixelY = (1.0 - visionBBox.origin.y - visionBBox.height) * elementSize.height
                                     let pixelWidth = visionBBox.width * elementSize.width
+                                    let pixelHeight = visionBBox.height * elementSize.height
                                     
-                                    let finalX = elementPos.x + pixelX + (pixelWidth / 2.0)
-                                    let finalY = elementPos.y + pixelY // Top edge
+                                    let tMinX = elementPos.x + pixelX
+                                    let tMaxX = tMinX + pixelWidth
+                                    let tMinY = elementPos.y + pixelY
+                                    let tMaxY = tMinY + pixelHeight
                                     
-                                    foundPos = CGPoint(x: finalX, y: finalY)
-                                    log("Found position: \(foundPos!)")
-                                    break
-                                } else {
-                                    // log("NO MATCH: \(cleanOcr)") // Too spammy, only uncomment if needed
+                                    if tMinX < minX { minX = tMinX }
+                                    if tMaxX > maxX { maxX = tMaxX }
+                                    if tMinY < minY { minY = tMinY }
+                                    if tMaxY > maxY { maxY = tMaxY }
+                                    foundAny = true
                                 }
                             }
+                        }
+                        
+                        if foundAny {
+                            let finalX = (minX + maxX) / 2.0
+                            let finalY = maxY // Bottom edge of the entire matched text block
+                            foundPos = CGPoint(x: finalX, y: finalY)
+                            log("Found combined position: \(foundPos!)")
                         }
                     }
                     continuation.resume()
