@@ -1131,7 +1131,7 @@ class TextEditManager: ObservableObject {
         pasteboard.clearContents()
         
         simulateKeystroke(keyCode: 8, flags: .maskCommand) // Cmd+C
-        usleep(100_000) // 100ms
+        usleep(300_000) // 300ms (Electron apps are slow to write to clipboard)
         
         if let copied = pasteboard.string(forType: .string), !copied.isEmpty {
             self.wasTextSelected = true
@@ -1143,7 +1143,7 @@ class TextEditManager: ObservableObject {
         simulateKeystroke(keyCode: 0, flags: .maskCommand) // Cmd+A
         usleep(150_000)
         simulateKeystroke(keyCode: 8, flags: .maskCommand) // Cmd+C
-        usleep(100_000)
+        usleep(300_000) // 300ms
         
         if let copied = pasteboard.string(forType: .string), !copied.isEmpty {
             self.wasTextSelected = false
@@ -1306,8 +1306,8 @@ class TextEditManager: ObservableObject {
                 let g = Int(rawData[byteIndex + 1])
                 let b = Int(rawData[byteIndex + 2])
                 
-                // Blueish heuristic
-                if b > r + 15 && b > g + 15 && b > 60 {
+                // Stricter Blueish heuristic to avoid false-positives on dark-mode grey/blue backgrounds
+                if b > r + 30 && b > g + 30 && b > 80 {
                     if x < minX { minX = x }
                     if x > maxX { maxX = x }
                     if y < minY { minY = y }
@@ -1318,6 +1318,12 @@ class TextEditManager: ObservableObject {
         }
         
         if foundCount > 10 { // Ensure it's not just a stray pixel
+            let boxHeight = maxY - minY
+            // If the "highlight" spans more than 80% of the capture area, it's almost certainly a false positive (like a desktop wallpaper or app background)
+            if CGFloat(boxHeight) > CGFloat(height) * 0.8 {
+                log("Rejected blue bounding box because it is too large (height \(boxHeight) vs \(height)). Probably a background false-positive.")
+                return nil
+            }
             log("Found blue bounding box: \(minX),\(minY) to \(maxX),\(maxY) with \(foundCount) pixels")
             let relativeMidX = CGFloat(minX + maxX) / 2.0 / CGFloat(width)
             let relativeTopY = CGFloat(minY) / CGFloat(height) // Use top edge instead of middle
