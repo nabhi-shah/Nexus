@@ -1094,10 +1094,10 @@ class TextEditManager: ObservableObject {
                 var rect = CGRect.zero
                 if AXValueGetValue(axValue, .cgRect, &rect) {
                     log("getCursorPosition: found bounds \(rect)")
-                    // If the bounding box is suspiciously tall (e.g., entire paragraph returned by buggy Electron/Chrome)
-                    if rect.height > 60 {
-                        log("getCursorPosition: bounding box too tall (\(rect.height)), falling back")
-                        return nil // Force fallback to mouse position
+                    // If they didn't select text, and the bounding box is huge, it's a browser bug!
+                    if !TextEditManager.shared.wasTextSelected && rect.height > 60 {
+                        log("getCursorPosition: bounding box too tall (\(rect.height)) for typing, falling back")
+                        return nil 
                     }
                     return CGPoint(x: rect.midX, y: rect.minY) // Top center of selection
                 }
