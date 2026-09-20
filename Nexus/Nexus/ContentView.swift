@@ -1094,6 +1094,11 @@ class TextEditManager: ObservableObject {
                 var rect = CGRect.zero
                 if AXValueGetValue(axValue, .cgRect, &rect) {
                     log("getCursorPosition: found bounds \(rect)")
+                    // If the bounding box is suspiciously tall (e.g., entire paragraph returned by buggy Electron/Chrome)
+                    if rect.height > 60 {
+                        log("getCursorPosition: bounding box too tall (\(rect.height)), falling back")
+                        return nil // Force fallback to mouse position
+                    }
                     return CGPoint(x: rect.midX, y: rect.minY) // Top center of selection
                 }
             }
@@ -1315,10 +1320,8 @@ class TextEditManager: ObservableObject {
             let relativeMidX = CGFloat(minX + maxX) / 2.0 / CGFloat(width)
             let relativeMidY = CGFloat(minY + maxY) / 2.0 / CGFloat(height)
             
-            let invertedRelativeMidY = 1.0 - relativeMidY
-            
             let globalX = elementPos.x + relativeMidX * elementSize.width
-            let globalY = screenHeight - (elementPos.y + invertedRelativeMidY * elementSize.height)
+            let globalY = screenHeight - (elementPos.y + relativeMidY * elementSize.height)
             log("Returning global pos: \(globalX), \(globalY)")
             return CGPoint(x: globalX, y: globalY)
         }
