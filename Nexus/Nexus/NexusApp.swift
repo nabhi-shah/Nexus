@@ -205,7 +205,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Target coordinates
         var originX = manager.menuPosition.x - (winWidth / 2)
-        var originY = manager.menuPosition.y - (winHeight / 2)
+        // Since buttons are centered in the 200px window (extending from y=78 to y=122),
+        // we subtract 68 to place the bottom of the buttons exactly 10px above the target Y.
+        var originY = manager.menuPosition.y - 68
         
         // Clamp to screen bounds
         let screens = NSScreen.screens
@@ -223,7 +225,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // By default, it's above the text. If it goes off the top of the screen:
             if originY + winHeight > screenFrame.maxY {
                 // Flip it to be BELOW the text
-                originY = manager.menuPosition.y - (winHeight / 2) - 40
+                // Text might have some height, but assuming we want the top of buttons 10px below the target
+                // If target is top of text, flipping below is tricky, but let's just shift it down by 100
+                originY = manager.menuPosition.y - 132
             }
             
             // If it goes off the bottom of the screen

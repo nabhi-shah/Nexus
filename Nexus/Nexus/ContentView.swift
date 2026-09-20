@@ -1318,10 +1318,10 @@ class TextEditManager: ObservableObject {
         if foundCount > 10 { // Ensure it's not just a stray pixel
             log("Found blue bounding box: \(minX),\(minY) to \(maxX),\(maxY) with \(foundCount) pixels")
             let relativeMidX = CGFloat(minX + maxX) / 2.0 / CGFloat(width)
-            let relativeMidY = CGFloat(minY + maxY) / 2.0 / CGFloat(height)
+            let relativeTopY = CGFloat(minY) / CGFloat(height) // Use top edge instead of middle
             
             let globalX = elementPos.x + relativeMidX * elementSize.width
-            let globalY = screenHeight - (elementPos.y + relativeMidY * elementSize.height)
+            let globalY = screenHeight - (elementPos.y + relativeTopY * elementSize.height)
             log("Returning global pos: \(globalX), \(globalY)")
             return CGPoint(x: globalX, y: globalY)
         }
@@ -1448,7 +1448,7 @@ class TextEditManager: ObservableObject {
                         
                         if foundAny {
                             let finalX = (minX + maxX) / 2.0
-                            let finalY = maxY // Bottom edge of the entire matched text block
+                            let finalY = minY // Top edge of the entire matched text block
                             foundPos = CGPoint(x: finalX, y: finalY)
                             log("Found combined position: \(foundPos!)")
                         }
