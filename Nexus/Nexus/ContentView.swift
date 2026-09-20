@@ -1606,24 +1606,71 @@ struct TextEditGlassButton: View {
 }
 
 
+struct TextEditGooeyBackground: View {
+    var expanded: Bool
+    var isEditExpanded: Bool
+    
+    var body: some View {
+        Canvas { context, size in
+            context.addFilter(.alphaThreshold(min: 0.5, color: .black))
+            context.addFilter(.blur(radius: 12))
+            
+            context.drawLayer { ctx in
+                for i in 0..<5 {
+                    if let resolved = context.resolveSymbol(id: i) {
+                        ctx.draw(resolved, at: CGPoint(x: size.width / 2, y: size.height / 2))
+                    }
+                }
+            }
+        } symbols: {
+            // Anchor
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .frame(width: 44, height: 44)
+                .tag(0)
+            
+            if isEditExpanded {
+                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 200, height: 44).offset(x: expanded ? -28 : 0).tag(1)
+                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 100 : 0).tag(4)
+            } else {
+                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 90, height: 44).offset(x: expanded ? -101 : 0).tag(1)
+                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 90, height: 44).offset(x: expanded ? 1 : 0).tag(2)
+                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 78 : 0).tag(3)
+                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 134 : 0).tag(4)
+            }
+        }
+    }
+}
+
+
+class EventMonitorHolder {
+    var globalMonitor: Any?
+    var localMonitor: Any?
+}
+
 struct TextEditOverlayView: View {
     var onCancel: () -> Void
     @State private var isVisible = false
     @State private var buttonsExpanded = false
-    @State private var dropYOffset: CGFloat = -20
     @Namespace private var glassSpace
     
     @State private var isEditExpanded = false
     @State private var customPrompt = ""
     @ObservedObject var manager = TextEditManager.shared
     
+    @State private var monitorHolder = EventMonitorHolder()
+    
+    
     var body: some View {
-        ZStack(alignment: .top) {
-            
-            // Removed Color.clear to allow clicks to pass through
-            
+        ZStack(alignment: .center) {
+            Color.white.opacity(0.001) // Transparent background to catch clicks inside our large 500x200 window
+                .onTapGesture { onCancel() }
+                
             VStack {
-                ZStack(alignment: .top) {
+                ZStack(alignment: .center) {
+                    TextEditGooeyBackground(expanded: buttonsExpanded, isEditExpanded: isEditExpanded)
+                        .frame(width: 500, height: 200)
+                        .opacity(buttonsExpanded ? 0 : 1)
+                    
                     GlassEffectContainer(spacing: 12) {
                         HStack(spacing: 12) {
                             if !isEditExpanded {
@@ -1631,9 +1678,7 @@ struct TextEditOverlayView: View {
                                     manager.processText(action: "rephrase") { success, newText in
                                         if success, let newText = newText { 
                                             onCancel()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                manager.replaceText(newText: newText)
-                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                         }
                                     }
                                 })
@@ -1644,9 +1689,7 @@ struct TextEditOverlayView: View {
                                     manager.processText(action: "formalize") { success, newText in
                                         if success, let newText = newText { 
                                             onCancel()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                manager.replaceText(newText: newText)
-                                            }
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                         }
                                     }
                                 })
@@ -1655,7 +1698,6 @@ struct TextEditOverlayView: View {
                             }
                             
                             if isEditExpanded {
-                                // Custom Input
                                 HStack {
                                     TextField("Edit instruction...", text: $customPrompt, axis: .vertical)
                                         .lineLimit(1...6)
@@ -1664,25 +1706,12 @@ struct TextEditOverlayView: View {
                                         .foregroundColor(.white)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 8)
-                                        .mask(
-                                            LinearGradient(
-                                                gradient: Gradient(stops: [
-                                                    .init(color: .clear, location: 0.0),
-                                                    .init(color: .black, location: 0.15),
-                                                    .init(color: .black, location: 0.85),
-                                                    .init(color: .clear, location: 1.0)
-                                                ]),
-                                                startPoint: .top,
-                                                endPoint: .bottom
-                                            )
-                                        )
+                                        .mask(LinearGradient(gradient: Gradient(stops: [.init(color: .clear, location: 0.0), .init(color: .black, location: 0.15), .init(color: .black, location: 0.85), .init(color: .clear, location: 1.0)]), startPoint: .top, endPoint: .bottom))
                                         .onSubmit {
                                             manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
                                                 if success, let newText = newText { 
                                                     onCancel()
-                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                        manager.replaceText(newText: newText)
-                                                    }
+                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                                 }
                                             }
                                         }
@@ -1691,9 +1720,7 @@ struct TextEditOverlayView: View {
                                         manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
                                             if success, let newText = newText { 
                                                 onCancel()
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                                    manager.replaceText(newText: newText)
-                                                }
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                             }
                                         }
                                     }) {
@@ -1736,13 +1763,13 @@ struct TextEditOverlayView: View {
                             }
                         }
                     }
-                    .scaleEffect(buttonsExpanded ? 1.0 : 0.01, anchor: .bottom)
+                    .scaleEffect(buttonsExpanded ? 1.0 : 0.01, anchor: .center)
                     .opacity(buttonsExpanded ? 1.0 : 0.0)
                     
                     if manager.isProcessing {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .padding(.top, 20)
+                            .padding(.top, 80)
                     }
                     
                     if !manager.errorMessage.isEmpty {
@@ -1751,24 +1778,43 @@ struct TextEditOverlayView: View {
                             .padding(8)
                             .background(Color.black.opacity(0.7))
                             .cornerRadius(8)
-                            .padding(.top, 20)
+                            .padding(.top, 80)
                     }
                 }
             }
         }
         .onAppear {
+            monitorHolder.globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { event in
+                if event.type == .keyDown && event.keyCode == 53 {
+                    onCancel()
+                } else if event.type == .leftMouseDown || event.type == .rightMouseDown {
+                    onCancel()
+                }
+            }
+            monitorHolder.localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+                if event.keyCode == 53 {
+                    onCancel()
+                    return nil
+                }
+                return event
+            }
+            
             withAnimation(.spring(response: 0.5, dampingFraction: 0.65)) {
-                dropYOffset = 20
                 buttonsExpanded = true
             }
         }
+        .onDisappear {
+            if let monitor = monitorHolder.globalMonitor { NSEvent.removeMonitor(monitor) }
+            if let monitor = monitorHolder.localMonitor { NSEvent.removeMonitor(monitor) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
             if let window = notification.object as? NSWindow, window.isEqual(NSApplication.shared.keyWindow) == false {
-                if window is CaptureWindow && window.frame.size.width == 400 {
+                if window is CaptureWindow && window.frame.size.width == 500 {
                     onCancel()
                 }
             }
         }
     }
 }
+
 

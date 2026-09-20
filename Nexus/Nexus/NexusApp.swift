@@ -180,10 +180,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-        func showTextEditOverlay() {
+    func showTextEditOverlay() {
         if textEditWindow == nil {
             // Make a window large enough to accommodate vertical expansion
-            let window = CaptureWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 44), styleMask: [.borderless], backing: .buffered, defer: false)
+            let window = CaptureWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
             window.level = .floating
             window.backgroundColor = .clear
             window.isOpaque = false
@@ -194,17 +194,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         let view = TextEditOverlayView { [weak self] in
             self?.textEditWindow?.orderOut(nil)
+            NSApp.hide(nil)
         }
-        textEditWindow?.contentView = NSHostingView(rootView: view)
+        textEditWindow?.contentView = NSHostingView(rootView: view.id(UUID()))
         
         // Position window globally!
         let manager = TextEditManager.shared
-        let winWidth: CGFloat = 400
-        let winHeight: CGFloat = 44
+        let winWidth: CGFloat = 500
+        let winHeight: CGFloat = 200
         
         // Target coordinates
         var originX = manager.menuPosition.x - (winWidth / 2)
-        var originY = manager.menuPosition.y + 10
+        var originY = manager.menuPosition.y - (winHeight / 2)
         
         // Clamp to screen bounds
         let screens = NSScreen.screens
@@ -222,11 +223,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // By default, it's above the text. If it goes off the top of the screen:
             if originY + winHeight > screenFrame.maxY {
                 // Flip it to be BELOW the text
-                // Estimate text height as 30, plus 10px padding
-                originY = manager.menuPosition.y - 40 - winHeight
+                originY = manager.menuPosition.y - (winHeight / 2) - 40
             }
             
-            // If it goes off the bottom of the screen (e.g. if flipped, or text is near bottom)
+            // If it goes off the bottom of the screen
             if originY < screenFrame.minY {
                 originY = screenFrame.minY + 10
             }
