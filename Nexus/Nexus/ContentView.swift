@@ -1426,19 +1426,30 @@ class TextEditManager: ObservableObject {
                             if let topCandidate = obs.topCandidates(1).first {
                                 let ocrText = topCandidate.string.lowercased()
                                 let cleanOcr = ocrText.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
-                                let ocrWords = ocrText.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count >= 6 }
-                                var fuzzyMatch = false
-                                for word in ocrWords {
-                                    if cleanTarget.contains(word) {
-                                        fuzzyMatch = true
-                                        break
+                                
+                                var isMatch = false
+                                if !cleanOcr.isEmpty && !cleanTarget.isEmpty {
+                                    let isShortTarget = cleanTarget.count < 15
+                                    if isShortTarget {
+                                        // For short selections (1-2 words), accept substring matches
+                                        if cleanOcr == cleanTarget || cleanTarget.contains(cleanOcr) || cleanOcr.contains(cleanTarget) {
+                                            isMatch = true
+                                        }
+                                    } else {
+                                        // For long selections, require a substantial substring match OR fuzzy word match
+                                        let ocrWords = ocrText.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count >= 4 }
+                                        var matchCount = 0
+                                        for word in ocrWords {
+                                            if cleanTarget.contains(word) {
+                                                matchCount += 1
+                                            }
+                                        }
+                                        
+                                        if (cleanOcr.count >= 15 && cleanTarget.contains(cleanOcr)) || matchCount >= 3 {
+                                            isMatch = true
+                                        }
                                     }
                                 }
-                                
-                                let isMatch = (!cleanOcr.isEmpty && !cleanTarget.isEmpty) && 
-                                              ((cleanOcr.count >= 5 && cleanTarget.contains(cleanOcr)) || 
-                                               (cleanTarget.count >= 5 && cleanOcr.contains(cleanTarget)) || 
-                                               cleanOcr == cleanTarget || fuzzyMatch)
                                 
                                 if isMatch {
                                     log("MATCH FOUND! OCR: \(ocrText)")
