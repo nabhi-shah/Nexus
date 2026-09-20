@@ -1635,13 +1635,13 @@ struct TextEditGooeyBackground: View {
                 .tag(0)
             
             if isEditExpanded {
-                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 200, height: 44).offset(x: expanded ? -28 : 0).tag(1)
-                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 100 : 0).tag(4)
+                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 248, height: 44).offset(x: expanded ? -22 : 0).tag(1)
+                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 136 : 0).tag(4)
             } else {
                 RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 90, height: 44).offset(x: expanded ? -101 : 0).tag(1)
                 RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 90, height: 44).offset(x: expanded ? 1 : 0).tag(2)
-                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 78 : 0).tag(3)
-                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 134 : 0).tag(4)
+                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 80 : 0).tag(3)
+                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 136 : 0).tag(4)
             }
         }
     }
@@ -1734,7 +1734,7 @@ struct TextEditOverlayView: View {
                                                 .onSubmit {
                                                     manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
                                                         if success, let newText = newText { 
-                                                            onCancel()
+                                                            closeWithAnimation()
                                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                                         }
                                                     }
@@ -1743,7 +1743,7 @@ struct TextEditOverlayView: View {
                                             Button(action: {
                                                 manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
                                                     if success, let newText = newText { 
-                                                        onCancel()
+                                                            closeWithAnimation()
                                                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                                     }
                                                 }
@@ -1758,27 +1758,27 @@ struct TextEditOverlayView: View {
                                         .transition(.opacity.animation(.easeInOut(duration: 0.3)))
                                     }
                                 }
-                                .frame(width: !buttonsExpanded ? 44 : 200).frame(minHeight: 44)
+                                .frame(width: !buttonsExpanded ? 44 : 248).frame(minHeight: 44)
                                 .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(!buttonsExpanded ? Color.black : Color.black.opacity(0.4)))
                                 .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(!buttonsExpanded ? Color.clear : Color.white.opacity(0.3), lineWidth: 1))
                                 .shadow(color: !buttonsExpanded ? .clear : .black.opacity(0.2), radius: 5)
                                 .matchedGeometryEffect(id: "edit_m", in: glassSpace)
-                                .offset(x: buttonsExpanded ? -28 : 0)
+                                .offset(x: buttonsExpanded ? -22 : 0)
                             } else {
-                                TextEditGlassButton(systemIcon: "phosphor_cursor-text", action: {
+                                TextEditGlassButton(systemIcon: "pencil", action: {
                                     withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                                         isEditExpanded.toggle()
                                     }
                                 }, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? 78 : 0)
+                                .offset(x: buttonsExpanded ? 80 : 0)
                                 .glassEffectID("edit", in: glassSpace)
                                 .matchedGeometryEffect(id: "edit_m", in: glassSpace)
                             }
                             
                             if !isEditExpanded {
                                 TextEditGlassButton(systemIcon: "phosphor_x", action: { closeWithAnimation() }, isCloseButton: true, isBlackDot: !buttonsExpanded)
-                                    .offset(x: buttonsExpanded ? 134 : 0)
+                                    .offset(x: buttonsExpanded ? 136 : 0)
                                     .glassEffectID("close", in: glassSpace)
                             } else {
                                 TextEditGlassButton(systemIcon: "phosphor_x", action: {
@@ -1787,7 +1787,7 @@ struct TextEditOverlayView: View {
                                         customPrompt = ""
                                     }
                                 }, isCloseButton: true, isBlackDot: !buttonsExpanded)
-                                    .offset(x: buttonsExpanded ? 100 : 0)
+                                    .offset(x: buttonsExpanded ? 136 : 0)
                                     .glassEffectID("close", in: glassSpace)
                             }
                         }
