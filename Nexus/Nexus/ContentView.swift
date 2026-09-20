@@ -73,24 +73,22 @@ class CaptureManager: ObservableObject {
     @Published var isHoveringClose = false
     @Published var isCapturing = false
     @Published var isProcessing = false
+    @Published var capturedImage: NSImage? = nil
+    @Published var imagePosition: CGPoint = .zero
+    @Published var imageScale: CGFloat = 1.0
+    @Published var isAnimatingToWindow = false
     
     var isCursorHidden = false
     
     var isFinished = false
+    var hasAddedMonitor = false
     
     func hideCursor() {
-        if isFinished { return }
-        if !isCursorHidden {
-            NSCursor.hide()
-            isCursorHidden = true
-        }
+        // Disabled to keep cursor visible
     }
     
     func unhideCursor() {
-        if isCursorHidden {
-            NSCursor.unhide()
-            isCursorHidden = false
-        }
+        // Disabled to keep cursor visible
     }
     
     let unionRect: NSRect
@@ -112,7 +110,7 @@ class CaptureManager: ObservableObject {
         let curr = toLocal(currentLoc)
         let size: CGFloat = 30
         
-        if isDragging, let _ = startLoc {
+        if (isDragging || isCapturing || isProcessing), let _ = startLoc {
             var rectX = min(start.x, curr.x)
             var rectY = min(start.y, curr.y)
             var rectW = abs(start.x - curr.x)
@@ -151,9 +149,11 @@ struct GooeyBackground: View {
             }
         } symbols: {
             // Anchor (fixed at the top notch)
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .frame(width: 80, height: 40)
-                .offset(y: -20)
+            // Mimics the MacBook physical notch (approx 216x32 visible). 
+            // Height 64 centered at 0 (via -22 offset) makes it extend exactly 32pt down.
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .frame(width: 216, height: 64)
+                .offset(y: -22) // Cancel out the y:22 draw position
                 .tag(0)
             
             // Dots (move with dropYOffset)
@@ -190,12 +190,11 @@ struct GlassMenuButton: View {
             .frame(width: 44, height: 44)
         }
         .buttonStyle(PlainButtonStyle())
-        .glassEffect(
-            .regular.tint(
-                isBlackDot ? .black : (isCloseButton ? .red.opacity(0.5) : .white.opacity(isHovering ? 0.2 : 0.1))
-            ),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isBlackDot ? Color.black : (isCloseButton ? Color.red.opacity(isHovering ? 0.7 : 0.2) : Color.white.opacity(isHovering ? 0.2 : 0.05)))
         )
+        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(isBlackDot ? Color.clear : Color.white.opacity(0.3), lineWidth: 1))
         .shadow(color: isBlackDot ? .clear : .black.opacity(0.2), radius: 5)
         .focusable(false)
@@ -213,44 +212,40 @@ struct GlassMenuButton: View {
     }
 }
 
-struct BorderBeamView: View {
-    var beamColor: Color = .cyan
-    var duration: Double = 4.0
-    var lineWidth: CGFloat = 2.0
-    var cornerRadius: CGFloat = 16.0
 
-    var body: some View {
-        TimelineView(.animation) { context in
-            let time = context.date.timeIntervalSinceReferenceDate
-            let angle = (time / duration).truncatingRemainder(dividingBy: 1.0) * 360.0
-
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .stroke(
-                    AngularGradient(
-                        gradient: Gradient(colors: [.clear, beamColor, .clear]),
-                        center: .center,
-                        startAngle: .degrees(angle),
-                        endAngle: .degrees(angle + 90)
-                    ),
-                    lineWidth: lineWidth
-                )
-        }
-    }
-}
-
-struct FlashOverlay: View {
+struct RippleDistortionView: View {
     var rect: CGRect
-    @State private var flashOpacity = 0.8
+    var cornerRadius: CGFloat
+    @ObservedObject var manager: CaptureManager
+    @State private var time: Float = 0.0
+    
     var body: some View {
-        Color.white
-            .opacity(flashOpacity)
-            .frame(width: rect.width, height: rect.height)
-            .position(x: rect.midX, y: rect.midY)
-            .onAppear {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    flashOpacity = 0.0
-                }
+        ZStack {
+            if let img = manager.capturedImage {
+                Image(nsImage: img)
+                    .resizable()
+                    .frame(width: rect.width, height: rect.height)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+                    .layerEffect(
+                        ShaderLibrary.chromaticRipple(
+                            .float(time),
+                            .float2(Float(rect.width / 2), Float(rect.height / 2)),
+                            .float(50.0), // very strong amplitude
+                            .float(25.0), // frequency
+                            .float(0.01) // decay (slower decay so it reaches edges strongly)
+                        ),
+                        maxSampleOffset: CGSize(width: 150, height: 150) // Allow for large coordinate shifts
+                    )
+            } else {
+                Color.clear
             }
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 2.0)) {
+                time = 2.0
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -289,7 +284,7 @@ struct CaptureOverlayView: View {
     
     var body: some View {
         ZStack {
-            Color.clear.ignoresSafeArea()
+            // Removed Color.clear to allow clicks to pass through
             
             // Navy Blue Gradient Overlay with Blur
             VStack(spacing: 0) {
@@ -311,7 +306,6 @@ struct CaptureOverlayView: View {
             }
             .ignoresSafeArea(.all, edges: [.bottom, .leading, .trailing])
             .allowsHitTesting(false)
-            .opacity(manager.isProcessing ? 0 : 1)
             
             let r = manager.rect
             
@@ -337,9 +331,16 @@ struct CaptureOverlayView: View {
                     .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
                 CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(270))
                     .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
+                
+                if manager.isProcessing {
+                    RippleDistortionView(rect: r, cornerRadius: dynamicRadius, manager: manager)
+                        .frame(width: r.width, height: r.height)
+                        .transition(.opacity) // Prevent layout animation on insertion
+                }
             }
-            .position(x: r.midX, y: r.midY)
-            .opacity(manager.isProcessing ? 0 : (manager.isHoveringClose ? 0 : 1))
+            .position(manager.isAnimatingToWindow ? manager.imagePosition : CGPoint(x: r.midX, y: r.midY))
+            .scaleEffect(manager.isAnimatingToWindow ? manager.imageScale : 1.0)
+            .opacity(manager.isHoveringClose ? 0 : 1)
             
             // Dynamic Glass Island Drop
             VStack {
@@ -384,16 +385,6 @@ struct CaptureOverlayView: View {
                 .padding(.top, 0)
                 Spacer()
             }
-            .opacity(manager.isProcessing ? 0 : 1)
-            
-            if manager.isProcessing {
-                let dynamicRadius = min(16, min(r.width / 4, r.height / 4))
-                BorderBeamView(beamColor: Color(red: 0.05, green: 0.1, blue: 0.5), duration: 2.0, lineWidth: 4.0, cornerRadius: dynamicRadius)
-                    .frame(width: r.width, height: r.height)
-                    .position(x: r.midX, y: r.midY)
-                
-                FlashOverlay(rect: r)
-            }
         }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -411,6 +402,10 @@ struct CaptureOverlayView: View {
                 }
             }
             manager.currentLoc = NSEvent.mouseLocation
+            
+            if manager.hasAddedMonitor { return }
+            manager.hasAddedMonitor = true
+            
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .leftMouseDown, .leftMouseUp, .keyDown]) { event in
                 if event.type == .keyDown && event.keyCode == 53 {
                     closeWithAnimation()
@@ -418,7 +413,9 @@ struct CaptureOverlayView: View {
                 }
                 
                 let global = NSEvent.mouseLocation
-                manager.currentLoc = global
+                if !manager.isCapturing && !manager.isProcessing {
+                    manager.currentLoc = global
+                }
                 
                 // Fallback check if it's in the top right 100x100 area
                 let isTopRight = global.x > manager.unionRect.maxX - 120 && global.y > manager.unionRect.maxY - 120
@@ -427,12 +424,14 @@ struct CaptureOverlayView: View {
                 if event.type == .leftMouseDown {
                     if isOverClose { return event }
                     manager.startLoc = global
+                    manager.capturedImage = nil
                     manager.isDragging = true
                 } else if event.type == .leftMouseUp {
                     if isOverClose { return event }
                     if !manager.isDragging { return event }
                     
                     manager.isDragging = false
+                    manager.isCapturing = true
                     if let start = manager.startLoc {
                         let minX = min(start.x, global.x)
                         let maxX = max(start.x, global.x)
@@ -480,13 +479,15 @@ class LensScraper: ObservableObject {
     let serpApiKey: String = ProcessInfo.processInfo.environment["SERPAPI_API_KEY"] ?? ""
     let geminiApiKey: String = ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
     
-    var captureWindow: NSWindow?
+    var captureWindows: [NSWindow] = []
     var eventMonitor: Any?
     var mainWindow: NSWindow?
     
     private func closeCaptureWindow() {
-        captureWindow?.orderOut(nil)
-        captureWindow = nil
+        for window in captureWindows {
+            window.orderOut(nil)
+        }
+        captureWindows.removeAll()
     }
     
     func startCapture() {
@@ -502,32 +503,44 @@ class LensScraper: ObservableObject {
     
     private func showCaptureOverlay() {
         let manager = CaptureManager()
-        manager.hideCursor()
         
         let overlayView = CaptureOverlayView(manager: manager, onCapture: { [weak self] rect in
             DispatchQueue.main.async {
-                manager.unhideCursor()
                 manager.isCapturing = true // State flag
                 self?.executeScreencapture(rect: rect, manager: manager)
             }
         }, onCancel: { [weak self] in
             DispatchQueue.main.async {
                 manager.isFinished = true
-                manager.unhideCursor()
                 self?.statusText = "Capture cancelled."
                 self?.isScraping = false
             }
         })
         
-        captureWindow = CaptureWindow(contentRect: manager.unionRect, styleMask: [.borderless], backing: .buffered, defer: false)
-        captureWindow?.level = .floating
-        captureWindow?.backgroundColor = .clear
-        captureWindow?.isOpaque = false
-        captureWindow?.hasShadow = false
-        captureWindow?.sharingType = .none
-        captureWindow?.acceptsMouseMovedEvents = true
-        captureWindow?.contentView = NSHostingView(rootView: overlayView)
-        captureWindow?.makeKeyAndOrderFront(nil)
+        captureWindows.removeAll()
+        for screen in NSScreen.screens {
+            let window = CaptureWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.level = .floating
+            window.backgroundColor = .clear
+            window.isOpaque = false
+            window.hasShadow = false
+            window.sharingType = .none
+            window.acceptsMouseMovedEvents = true
+            
+            let offsetX = manager.unionRect.minX - screen.frame.minX
+            let offsetY = -(manager.unionRect.maxY - screen.frame.maxY)
+            
+            let shiftedView = overlayView
+                .frame(width: manager.unionRect.width, height: manager.unionRect.height)
+                .position(x: manager.unionRect.width / 2 + offsetX,
+                          y: manager.unionRect.height / 2 + offsetY)
+                .frame(width: screen.frame.width, height: screen.frame.height)
+                .clipped()
+            
+            window.contentView = NSHostingView(rootView: shiftedView)
+            window.makeKeyAndOrderFront(nil)
+            captureWindows.append(window)
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
     
@@ -535,27 +548,79 @@ class LensScraper: ObservableObject {
         let tempFilePath = NSTemporaryDirectory().appending("nexus_temp.png")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = ["-R", "\(rect.minX),\(rect.minY),\(rect.width),\(rect.height)", tempFilePath]
+        process.arguments = ["-x", "-R", "\(rect.minX),\(rect.minY),\(rect.width),\(rect.height)", tempFilePath]
         
         do {
             try process.run()
             process.terminationHandler = { [weak self] _ in
                 DispatchQueue.main.async {
-                    // Transition to loading UI
-                    manager.isCapturing = false
+                    if FileManager.default.fileExists(atPath: tempFilePath), let img = NSImage(contentsOfFile: tempFilePath) {
+                        manager.capturedImage = img
+                    }
+                    manager.imagePosition = CGPoint(x: rect.midX, y: rect.midY)
+                    manager.imageScale = 1.0
+                    
+                    // Transition to loading UI (ripple starts)
                     withAnimation(.easeOut(duration: 0.3)) {
                         manager.isProcessing = true
+                        manager.isCapturing = false
                     }
-                    self?.captureWindow?.ignoresMouseEvents = true
+                    for window in self?.captureWindows ?? [] {
+                        window.ignoresMouseEvents = true
+                    }
                     
-                    if self?.useMockData == true {
-                        try? FileManager.default.removeItem(atPath: tempFilePath)
-                        // Delay slightly to show the animation
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            self?.loadMockData()
+                    // Wait for the ripple to finish (approx 1.0s)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        guard let self = self else { return }
+                        
+                        // 1. Calculate Target Window Frame (Opposite side of screen)
+                        let screenRect = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+                        let fullScreenBounds = NSScreen.main?.frame ?? screenRect // For SwiftUI coords
+                        
+                        let windowWidth: CGFloat = 420
+                        let windowHeight = screenRect.height
+                        
+                        let isLeft = rect.midX < fullScreenBounds.midX
+                        let windowX = isLeft ? screenRect.maxX - windowWidth : screenRect.minX
+                        let windowY = screenRect.minY
+                        let targetWindowRect = NSRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight)
+                        
+                        // 2. Open Main Window there immediately
+                        self.mainWindow?.setFrame(targetWindowRect, display: true)
+                        self.mainWindow?.makeKeyAndOrderFront(nil)
+                        
+                        // 3. Animate the image to the main window
+                        manager.isAnimatingToWindow = true
+                        
+                        // Calculate target position in overlay window's coordinates (SwiftUI top-left)
+                        let targetGlobalX = windowX + windowWidth / 2.0
+                        let targetGlobalY = windowY + windowHeight / 2.0
+                        let targetPos = manager.toLocal(CGPoint(x: targetGlobalX, y: targetGlobalY))
+                        
+                        // Scale down to fit inside the window width nicely
+                        let targetScale = min(1.0, (windowWidth - 60) / rect.width)
+                        
+                        // Curved animation (X and Y with different easing)
+                        withAnimation(.easeIn(duration: 0.6)) {
+                            manager.imagePosition.x = targetPos.x
                         }
-                    } else {
-                        self?.uploadToSerpApi(filePath: tempFilePath)
+                        withAnimation(.easeOut(duration: 0.6)) {
+                            manager.imagePosition.y = targetPos.y
+                            manager.imageScale = targetScale
+                        }
+                        
+                        // 4. Wait for curved animation to finish, then proceed with API call
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
+                            if self.useMockData {
+                                try? FileManager.default.removeItem(atPath: tempFilePath)
+                                self.loadMockData()
+                            } else {
+                                self.uploadToSerpApi(filePath: tempFilePath)
+                            }
+                            
+                            // Close capture window
+                            self.closeCaptureWindow()
+                        }
                     }
                 }
             }
@@ -791,7 +856,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             // Header bar
             HStack {
-                Text("Nexus (SerpApi)").font(.headline)
+                Text("Nexus (SerpApi)").font(.custom("Geist", size: 16).weight(.semibold))
                 Spacer()
                 Button(action: {
                     scraper.startCapture()
@@ -827,11 +892,11 @@ struct ContentView: View {
             } else if scraper.matches.isEmpty {
                 VStack {
                     Image(systemName: "photo.on.rectangle.angled")
-                        .font(.system(size: 60))
+                        .font(.custom("Geist", size: 60))
                         .foregroundColor(.secondary)
                         .padding()
                     Text("Ready.")
-                        .font(.headline)
+                        .font(.custom("Geist", size: 16).weight(.semibold))
                     Text("Click 'Take Snapshot' to search using SerpApi.")
                         .foregroundColor(.secondary)
                 }
@@ -840,15 +905,15 @@ struct ContentView: View {
                 // Results UI
                 VStack(alignment: .leading, spacing: 10) {
                     Text("AI Overview")
-                        .font(.headline)
+                        .font(.custom("Geist", size: 16).weight(.semibold))
                         .padding(.top)
                     
                     Text(scraper.overview)
-                        .font(.subheadline)
+                        .font(.custom("Geist", size: 14).weight(.regular))
                         .foregroundColor(.secondary)
                     
                     Text("Visual Matches")
-                        .font(.headline)
+                        .font(.custom("Geist", size: 16).weight(.semibold))
                         .padding(.top)
                     
                     ScrollView {
@@ -888,12 +953,12 @@ struct ContentView: View {
                                     // Text
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(match.source ?? "Unknown Source")
-                                            .font(.caption)
+                                            .font(.custom("Geist", size: 12).weight(.regular))
                                             .fontWeight(.semibold)
                                             .foregroundColor(.secondary)
                                         
                                         Text(match.title ?? "No title")
-                                            .font(.caption)
+                                            .font(.custom("Geist", size: 12).weight(.regular))
                                             .lineLimit(2)
                                             .multilineTextAlignment(.leading)
                                     }
@@ -923,3 +988,788 @@ struct ContentView: View {
         .frame(minWidth: 700, minHeight: 600)
     }
 }
+import Cocoa
+import ApplicationServices
+import Vision
+
+class TextEditManager: ObservableObject {
+    static let shared = TextEditManager()
+    
+    @Published var isProcessing = false
+    @Published var overlayText = ""
+    @Published var errorMessage = ""
+    
+    // Store the focused element
+    var currentElement: AXUIElement?
+    var originalText: String = ""
+    var wasTextSelected: Bool = false
+    
+    func getFocusedElement() -> AXUIElement? {
+        let systemWideElement = AXUIElementCreateSystemWide()
+        var focusedElement: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(systemWideElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
+        if err == .success, let focusedElement = focusedElement {
+            return (focusedElement as! AXUIElement)
+        }
+        return nil
+    }
+    
+    func isTextField(_ element: AXUIElement) -> Bool {
+        var role: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        
+        // 1. Check native settable fields
+        var settable: DarwinBoolean = false
+        if AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue {
+            return true
+        }
+        
+        // 2. Check selected text in Accessibility
+        var selectedText: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedText)
+        if let sel = selectedText as? String, !sel.isEmpty {
+            return true
+        }
+        
+        if let roleStr = role as? String {
+            if roleStr == kAXTextFieldRole || roleStr == kAXTextAreaRole || roleStr == "AXComboBox" || roleStr == "AXSearchField" {
+                return true
+            }
+        }
+        
+        // 3. Robust Clipboard Fallback
+        // Save full pasteboard
+        let pasteboard = NSPasteboard.general
+        let oldItems = pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
+            let newItem = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    newItem.setData(data, forType: type)
+                }
+            }
+            return newItem
+        }
+        
+        pasteboard.clearContents()
+        simulateKeystroke(keyCode: 8, flags: .maskCommand) // Cmd+C
+        usleep(150_000)
+        
+        var foundText = false
+        if let copied = pasteboard.string(forType: .string), !copied.isEmpty {
+            foundText = true
+        }
+        
+        // Restore full pasteboard
+        if let items = oldItems {
+            pasteboard.clearContents()
+            pasteboard.writeObjects(items)
+        }
+        
+        return foundText
+    }
+    
+        func getCursorPosition(element: AXUIElement?) -> CGPoint? {
+        func log(_ msg: String) {
+            let path = "/tmp/nexus_debug.txt"
+            if let fileHandle = FileHandle(forWritingAtPath: path) {
+                fileHandle.seekToEndOfFile()
+                fileHandle.write((msg + "\n").data(using: .utf8)!)
+                fileHandle.closeFile()
+            } else {
+                try? (msg + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+            }
+        }
+        
+        guard let element = element else { 
+            log("getCursorPosition: element is nil")
+            return nil 
+        }
+        
+        // 1. Try exact text cursor bounds
+        var selectedRangeValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &selectedRangeValue) == .success {
+            var boundsValue: CFTypeRef?
+            if AXUIElementCopyParameterizedAttributeValue(element, kAXBoundsForRangeParameterizedAttribute as CFString, selectedRangeValue!, &boundsValue) == .success {
+                let axValue = boundsValue as! AXValue
+                var rect = CGRect.zero
+                if AXValueGetValue(axValue, .cgRect, &rect) {
+                    log("getCursorPosition: found bounds \(rect)")
+                    return CGPoint(x: rect.midX, y: rect.minY) // Top center of selection
+                }
+            }
+        }
+        
+        log("getCursorPosition: failed to find exact cursor bounds")
+        return nil
+    }
+
+    func extractText(from element: AXUIElement?) -> String? {
+        if let element = element {
+            var selectedText: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedText)
+            if let selText = selectedText as? String, !selText.isEmpty {
+                self.wasTextSelected = true
+                return selText
+            }
+            
+            var value: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
+            if let text = value as? String, !text.isEmpty {
+                self.wasTextSelected = false
+                return text
+            }
+        }
+        
+        // Fallback to Clipboard (Cmd+C) if AXUI fails (e.g. in Electron apps)
+        let pasteboard = NSPasteboard.general
+        let oldString = pasteboard.string(forType: .string)
+        pasteboard.clearContents()
+        
+        simulateKeystroke(keyCode: 8, flags: .maskCommand) // Cmd+C
+        usleep(100_000) // 100ms
+        
+        if let copied = pasteboard.string(forType: .string), !copied.isEmpty {
+            self.wasTextSelected = true
+            if let old = oldString { pasteboard.setString(old, forType: .string) }
+            return copied
+        }
+        
+        // If nothing was selected, Select All then Copy
+        simulateKeystroke(keyCode: 0, flags: .maskCommand) // Cmd+A
+        usleep(150_000)
+        simulateKeystroke(keyCode: 8, flags: .maskCommand) // Cmd+C
+        usleep(100_000)
+        
+        if let copied = pasteboard.string(forType: .string), !copied.isEmpty {
+            self.wasTextSelected = false
+            if let old = oldString { pasteboard.setString(old, forType: .string) }
+            return copied
+        }
+        
+        if let old = oldString { pasteboard.setString(old, forType: .string) }
+        return nil
+    }
+    
+    func simulateKeystroke(keyCode: CGKeyCode, flags: CGEventFlags? = nil) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        let keyDown = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true)
+        let keyUp = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false)
+        if let flags = flags {
+            keyDown?.flags = flags
+            keyUp?.flags = flags
+        }
+        keyDown?.post(tap: .cghidEventTap)
+        keyUp?.post(tap: .cghidEventTap)
+    }
+    
+    func replaceText(newText: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(newText, forType: .string)
+        
+        // If text wasn't originally selected, we want to replace everything
+        if !self.wasTextSelected {
+            simulateKeystroke(keyCode: 0, flags: .maskCommand) // Cmd+A
+            usleep(150_000) // 50ms wait
+        }
+        
+        // Paste the text (this will overwrite the selection)
+        simulateKeystroke(keyCode: 9, flags: .maskCommand) // Cmd+V
+        usleep(100_000) // 100ms wait
+    }
+    
+    var extractedText: String? = nil
+    var menuPosition: CGPoint = .zero
+
+
+
+    func findHighlightPosition(element: AXUIElement, screenHeight: CGFloat) -> CGPoint? {
+        func log(_ msg: String) {
+            let path = "/tmp/nexus_debug.txt"
+            if let fileHandle = FileHandle(forWritingAtPath: path) {
+                fileHandle.seekToEndOfFile()
+                fileHandle.write((msg + "\n").data(using: .utf8)!)
+                fileHandle.closeFile()
+            } else {
+                try? (msg + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+            }
+        }
+        
+        log("Finding highlight...")
+        var posRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        var elementPos = CGPoint.zero
+        var elementSize = CGSize.zero
+        var usingFallbackBounds = false
+        
+        // 1. Try to get exact input element bounds
+        let posErr = AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef)
+        let sizeErr = AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef)
+        
+        if posErr == .success && sizeErr == .success,
+           let axPos = posRef as! AXValue?, let axSize = sizeRef as! AXValue? {
+            AXValueGetValue(axPos, .cgPoint, &elementPos)
+            AXValueGetValue(axSize, .cgSize, &elementSize)
+        } 
+        
+        // 2. If it failed, or size is suspicious (e.g. 0x0), try to get the parent Window bounds!
+        if elementSize.width <= 0 || elementSize.height <= 0 {
+            log("Input box bounds unavailable. Falling back to Window bounds.")
+            usingFallbackBounds = true
+            
+            var windowRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &windowRef) == .success,
+               let windowElement = windowRef as! AXUIElement? {
+                let wPosErr = AXUIElementCopyAttributeValue(windowElement, kAXPositionAttribute as CFString, &posRef)
+                let wSizeErr = AXUIElementCopyAttributeValue(windowElement, kAXSizeAttribute as CFString, &sizeRef)
+                
+                if wPosErr == .success && wSizeErr == .success,
+                   let axPos = posRef as! AXValue?, let axSize = sizeRef as! AXValue? {
+                    AXValueGetValue(axPos, .cgPoint, &elementPos)
+                    AXValueGetValue(axSize, .cgSize, &elementSize)
+                }
+            }
+        }
+        
+        if elementSize.width <= 0 || elementSize.height <= 0 { 
+            log("Window bounds also unavailable. Trying main screen bounds.")
+            if let screen = NSScreen.main {
+                // Note: screen.frame is bottom-left, we need top-left for our math.
+                // But screencapture -R uses top-left coordinates! 
+                // Let's just use the screen frame converted to top-left.
+                let frame = screen.frame
+                elementPos = CGPoint(x: frame.minX, y: 0) // rough approximation
+                elementSize = frame.size
+            } else {
+                return nil
+            }
+        }
+        
+        log("Capture bounds: \(elementPos.x),\(elementPos.y) \(elementSize.width)x\(elementSize.height)")
+        
+        let rect = CGRect(origin: elementPos, size: elementSize)
+        let tempFilePath = NSTemporaryDirectory().appending("nexus_temp_highlight.png")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = ["-x", "-R", "\(rect.minX),\(rect.minY),\(rect.width),\(rect.height)", tempFilePath]
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            log("Screencapture failed")
+            return nil
+        }
+        
+        guard let nsImage = NSImage(contentsOfFile: tempFilePath),
+              let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { 
+            log("Could not read image")
+            return nil 
+        }
+        try? FileManager.default.removeItem(atPath: tempFilePath)
+        
+        let width = cgImage.width
+        let height = cgImage.height
+        log("Image size: \(width)x\(height)")
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        var rawData = [UInt8](repeating: 0, count: width * height * 4)
+        let bytesPerPixel = 4
+        let bytesPerRow = bytesPerPixel * width
+        
+        guard let context = CGContext(data: &rawData, width: width, height: height, bitsPerComponent: 8, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { 
+            log("Context failed")
+            return nil 
+        }
+        
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        
+        var minX = width
+        var maxX = 0
+        var minY = height
+        var maxY = 0
+        var foundCount = 0
+        
+        // For fallback we might find multiple blue things. Let's find the cluster of blue.
+        // We'll track the bounding box of ALL blue pixels. If we scan the whole window, 
+        // there might be a blue button. A blue button is usually small, a text highlight is usually wide.
+        for y in 0..<height {
+            for x in 0..<width {
+                let byteIndex = (bytesPerRow * y) + x * bytesPerPixel
+                let r = Int(rawData[byteIndex])
+                let g = Int(rawData[byteIndex + 1])
+                let b = Int(rawData[byteIndex + 2])
+                
+                // Blueish heuristic
+                if b > r + 15 && b > g + 15 && b > 60 {
+                    if x < minX { minX = x }
+                    if x > maxX { maxX = x }
+                    if y < minY { minY = y }
+                    if y > maxY { maxY = y }
+                    foundCount += 1
+                }
+            }
+        }
+        
+        if foundCount > 10 { // Ensure it's not just a stray pixel
+            log("Found blue bounding box: \(minX),\(minY) to \(maxX),\(maxY) with \(foundCount) pixels")
+            let relativeMidX = CGFloat(minX + maxX) / 2.0 / CGFloat(width)
+            let relativeMidY = CGFloat(minY + maxY) / 2.0 / CGFloat(height)
+            
+            let invertedRelativeMidY = 1.0 - relativeMidY
+            
+            let globalX = elementPos.x + relativeMidX * elementSize.width
+            let globalY = screenHeight - (elementPos.y + invertedRelativeMidY * elementSize.height)
+            log("Returning global pos: \(globalX), \(globalY)")
+            return CGPoint(x: globalX, y: globalY)
+        }
+        log("No blue found")
+        return nil
+    }
+
+    func identifyMenuPositionWithJev(apiKey: String, fullText: String, element: AXUIElement?, screenHeight: CGFloat) async -> CGPoint? {
+        func log(_ msg: String) {
+            let path = "/tmp/nexus_debug.txt"
+            if let fileHandle = FileHandle(forWritingAtPath: path) {
+                fileHandle.seekToEndOfFile()
+                fileHandle.write((msg + "\n").data(using: .utf8)!)
+                fileHandle.closeFile()
+            } else {
+                try? (msg + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+            }
+        }
+        
+        log("--- Starting OCR Menu Position ---")
+        log("Target fullText: \(fullText)")
+        var posRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        var elementPos = CGPoint.zero
+        var elementSize = CGSize.zero
+        
+        if let element = element {
+            if AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef) == .success, let axPos = posRef as! AXValue? {
+                AXValueGetValue(axPos, .cgPoint, &elementPos)
+            }
+            if AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success, let axSize = sizeRef as! AXValue? {
+                AXValueGetValue(axSize, .cgSize, &elementSize)
+            }
+            log("Initial element bounds: \(elementPos), \(elementSize)")
+            
+            if elementSize.width <= 0 || elementSize.height <= 0 {
+                var windowRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &windowRef) == .success,
+                   let windowElement = windowRef as! AXUIElement? {
+                    if AXUIElementCopyAttributeValue(windowElement, kAXPositionAttribute as CFString, &posRef) == .success, let axPos = posRef as! AXValue? {
+                        AXValueGetValue(axPos, .cgPoint, &elementPos)
+                    }
+                    if AXUIElementCopyAttributeValue(windowElement, kAXSizeAttribute as CFString, &sizeRef) == .success, let axSize = sizeRef as! AXValue? {
+                        AXValueGetValue(axSize, .cgSize, &elementSize)
+                    }
+                    log("Fallback window bounds: \(elementPos), \(elementSize)")
+                }
+            }
+        }
+        
+        if elementSize.width <= 0 || elementSize.height <= 0 {
+            if let screen = NSScreen.main {
+                let frame = screen.frame
+                elementPos = CGPoint(x: frame.minX, y: 0)
+                elementSize = frame.size
+                log("Fallback screen bounds: \(elementPos), \(elementSize)")
+            } else {
+                log("Failed to get any bounds")
+                return nil
+            }
+        }
+        
+        let rect = CGRect(origin: elementPos, size: elementSize)
+        let tempFilePath = NSTemporaryDirectory().appending("nexus_ocr_vision.png")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = ["-x", "-R", "\(rect.minX),\(rect.minY),\(rect.width),\(rect.height)", tempFilePath]
+        try? process.run()
+        process.waitUntilExit()
+        
+        var foundPos: CGPoint? = nil
+        
+        if let nsImage = NSImage(contentsOfFile: tempFilePath),
+           let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            
+            log("Captured image size: \(nsImage.size)")
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let request = VNRecognizeTextRequest { req, err in
+                    if let err = err {
+                        log("VNRecognizeTextRequest error: \(err)")
+                    }
+                    if let results = req.results as? [VNRecognizedTextObservation] {
+                        let targetText = fullText.lowercased()
+                        let cleanTarget = targetText.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+                        log("Clean target text: \(cleanTarget)")
+                        
+                        for obs in results {
+                            if let topCandidate = obs.topCandidates(1).first {
+                                let ocrText = topCandidate.string.lowercased()
+                                let cleanOcr = ocrText.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+                                
+                                let isMatch = (!cleanOcr.isEmpty && !cleanTarget.isEmpty) && 
+                                              ((cleanOcr.count >= 3 && cleanTarget.contains(cleanOcr)) || 
+                                               (cleanTarget.count >= 3 && cleanOcr.contains(cleanTarget)) || 
+                                               cleanOcr == cleanTarget)
+                                
+                                if isMatch {
+                                    log("MATCH FOUND! OCR: \(ocrText)")
+                                    let visionBBox = obs.boundingBox
+                                    let pixelX = visionBBox.origin.x * elementSize.width
+                                    let pixelY = (1.0 - visionBBox.origin.y - visionBBox.height) * elementSize.height
+                                    let pixelWidth = visionBBox.width * elementSize.width
+                                    
+                                    let finalX = elementPos.x + pixelX + (pixelWidth / 2.0)
+                                    let finalY = elementPos.y + pixelY // Top edge
+                                    
+                                    foundPos = CGPoint(x: finalX, y: finalY)
+                                    log("Found position: \(foundPos!)")
+                                    break
+                                } else {
+                                    // log("NO MATCH: \(cleanOcr)") // Too spammy, only uncomment if needed
+                                }
+                            }
+                        }
+                    }
+                    continuation.resume()
+                }
+                request.recognitionLevel = .accurate
+                request.usesLanguageCorrection = false
+                
+                // FORCE CPU TO BYPASS NEURAL ENGINE E5 BUGS ON MACOS 14+
+                request.usesCPUOnly = true
+                
+                let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+                DispatchQueue.global(qos: .userInitiated).async {
+                    try? handler.perform([request])
+                }
+            }
+        } else {
+            log("Failed to load image from \(tempFilePath)")
+        }
+        
+        try? FileManager.default.removeItem(atPath: tempFilePath)
+        log("Finished OCR. Returning: \(String(describing: foundPos))")
+        return foundPos
+    }
+
+    func processText(action: String, customPrompt: String? = nil, completion: @escaping (Bool, String?) -> Void) {
+        guard let text = extractedText else {
+            self.errorMessage = "No text was selected or found."
+            completion(false, nil)
+            return
+        }
+        
+        self.originalText = text
+        self.isProcessing = true
+        self.errorMessage = ""
+        
+        Task {
+            do {
+                let result = try await callGemini(text: text, action: action, customPrompt: customPrompt)
+                
+                DispatchQueue.main.async {
+                    if result.hasPrefix("ERROR:") {
+                        self.errorMessage = result.replacingOccurrences(of: "ERROR:", with: "").trimmingCharacters(in: .whitespaces)
+                        self.isProcessing = false
+                        completion(false, nil)
+                    } else {
+                        self.isProcessing = false
+                        // Return the text so the UI can close FIRST, then paste it
+                        completion(true, result.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to reach Gemini: \(error.localizedDescription)"
+                    self.isProcessing = false
+                    completion(false, nil)
+                }
+            }
+        }
+    }
+    
+    func callGemini(text: String, action: String, customPrompt: String?) async throws -> String {
+        let delegate = NSApplication.shared.delegate as? AppDelegate
+        let geminiApiKey: String = delegate?.scraper.geminiApiKey ?? ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
+        if geminiApiKey.isEmpty {
+            return "ERROR: GEMINI_API_KEY environment variable is missing."
+        }
+        
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=\(geminiApiKey)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        var systemPrompt = ""
+        if action == "rephrase" {
+            systemPrompt = "You are a text editor. Rephrase the following text to make it clearer and more natural. Output ONLY the rephrased text, nothing else."
+        } else if action == "formalize" {
+            systemPrompt = "You are a text editor. Rewrite the following text to be more formal and professional. Output ONLY the rewritten text, nothing else."
+        } else if action == "custom", let cp = customPrompt {
+            systemPrompt = """
+            You are a strict text editor. You are given a user text and an edit instruction.
+            Instruction: "\(cp)"
+            
+            If the instruction is NOT a text edit operation (e.g., if it asks a general question like 'what is the capital of France' or 'write a poem'), you MUST output exactly: ERROR: The prompt must be a text edit operation.
+            Otherwise, apply the instruction to the text and output ONLY the modified text, nothing else.
+            """
+        }
+        
+        let fullPrompt = "\(systemPrompt)\n\nText: \(text)"
+        
+        let requestBody: [String: Any] = [
+            "contents": [
+                [
+                    "parts": [
+                        ["text": fullPrompt]
+                    ]
+                ]
+            ]
+        ]
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        
+        let (data, _) = try await URLSession.shared.data(for: request)
+        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let candidates = json["candidates"] as? [[String: Any]],
+           let firstCandidate = candidates.first,
+           let content = firstCandidate["content"] as? [String: Any],
+           let parts = content["parts"] as? [[String: Any]],
+           let firstPart = parts.first,
+           let responseText = firstPart["text"] as? String {
+            return responseText
+        }
+        
+        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let error = json["error"] as? [String: Any],
+           let message = error["message"] as? String {
+             return "ERROR: Gemini API Error: \(message)"
+        }
+        
+        throw URLError(.badServerResponse)
+    }
+}
+
+struct TextEditGlassButton: View {
+    var systemIcon: String
+    var title: String? = nil
+    var action: () -> Void
+    var isCloseButton: Bool = false
+    
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                if let t = title {
+                    Text(t)
+                        .font(.custom("Geist", size: 14).weight(.medium))
+                        .foregroundColor(.white)
+                } else {
+                    if systemIcon.hasPrefix("phosphor_") {
+                        Image(systemIcon)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 18, height: 18)
+                            .foregroundColor(isCloseButton ? .red : .white)
+                    } else {
+                        Image(systemName: systemIcon)
+                            .font(.custom("Geist", size: 16).weight(.semibold))
+                            .foregroundColor(isCloseButton ? .red : .white)
+                    }
+                }
+            }
+            .frame(width: title != nil ? 90 : 44, height: 44)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isCloseButton ? Color.red.opacity(isHovering ? 0.8 : 0.4) : Color.black.opacity(isHovering ? 0.6 : 0.4))
+        )
+        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.3), lineWidth: 1))
+        .shadow(color: .black.opacity(0.2), radius: 5)
+        .focusable(false)
+        .onHover { hovering in
+            isHovering = hovering
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+    }
+}
+
+
+struct TextEditOverlayView: View {
+    var onCancel: () -> Void
+    @State private var isVisible = false
+    @State private var buttonsExpanded = false
+    @State private var dropYOffset: CGFloat = -20
+    @Namespace private var glassSpace
+    
+    @State private var isEditExpanded = false
+    @State private var customPrompt = ""
+    @ObservedObject var manager = TextEditManager.shared
+    
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.clear.frame(width: 400, height: 300)
+            // Removed Color.clear to allow clicks to pass through
+            
+            VStack {
+                ZStack(alignment: .top) {
+                    GlassEffectContainer(spacing: 12) {
+                        HStack(spacing: 12) {
+                            if !isEditExpanded {
+                                TextEditGlassButton(systemIcon: "phosphor_translate", title: "Rephrase", action: {
+                                    manager.processText(action: "rephrase") { success, newText in
+                                        if success, let newText = newText { 
+                                            onCancel()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                                manager.replaceText(newText: newText)
+                                            }
+                                        }
+                                    }
+                                })
+                                .glassEffectID("rephrase", in: glassSpace)
+                                .transition(.scale.combined(with: .opacity))
+                                
+                                TextEditGlassButton(systemIcon: "briefcase", title: "Formalize", action: {
+                                    manager.processText(action: "formalize") { success, newText in
+                                        if success, let newText = newText { 
+                                            onCancel()
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                                manager.replaceText(newText: newText)
+                                            }
+                                        }
+                                    }
+                                })
+                                .glassEffectID("formalize", in: glassSpace)
+                                .transition(.scale.combined(with: .opacity))
+                            }
+                            
+                            if isEditExpanded {
+                                // Custom Input
+                                HStack {
+                                    TextField("Edit instruction...", text: $customPrompt, axis: .vertical)
+                                        .lineLimit(1...6)
+                                        .textFieldStyle(PlainTextFieldStyle())
+                                        .font(.custom("Geist", size: 14))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .mask(
+                                            LinearGradient(
+                                                gradient: Gradient(stops: [
+                                                    .init(color: .clear, location: 0.0),
+                                                    .init(color: .black, location: 0.15),
+                                                    .init(color: .black, location: 0.85),
+                                                    .init(color: .clear, location: 1.0)
+                                                ]),
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            )
+                                        )
+                                        .onSubmit {
+                                            manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
+                                                if success, let newText = newText { 
+                                                    onCancel()
+                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                                        manager.replaceText(newText: newText)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    
+                                    Button(action: {
+                                        manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
+                                            if success, let newText = newText { 
+                                                onCancel()
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                                    manager.replaceText(newText: newText)
+                                                }
+                                            }
+                                        }
+                                    }) {
+                                        Image(systemName: "arrow.up.circle.fill")
+                                            .foregroundColor(.white)
+                                            .font(.custom("Geist", size: 20))
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .padding(.trailing, 8)
+                                }
+                                .frame(width: 200).frame(minHeight: 44)
+                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.black.opacity(0.4)))
+                                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.3), lineWidth: 1))
+                                .shadow(color: .black.opacity(0.2), radius: 5)
+                                .matchedGeometryEffect(id: "edit_m", in: glassSpace)
+                            } else {
+                                TextEditGlassButton(systemIcon: "phosphor_cursor-text", action: {
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                        isEditExpanded.toggle()
+                                    }
+                                })
+                                .glassEffectID("edit", in: glassSpace)
+                                .matchedGeometryEffect(id: "edit_m", in: glassSpace)
+                            }
+                            
+                            if !isEditExpanded {
+                                TextEditGlassButton(systemIcon: "phosphor_x", action: { onCancel() }, isCloseButton: true)
+                                    .glassEffectID("close", in: glassSpace)
+                                    .transition(.scale.combined(with: .opacity))
+                            } else {
+                                TextEditGlassButton(systemIcon: "phosphor_x", action: {
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                        isEditExpanded = false
+                                        customPrompt = ""
+                                    }
+                                }, isCloseButton: true)
+                                    .glassEffectID("close", in: glassSpace)
+                                    .transition(.scale.combined(with: .opacity))
+                            }
+                        }
+                    }
+                    .offset(y: dropYOffset)
+                    .scaleEffect(buttonsExpanded ? 1.0 : 0.01, anchor: .bottom)
+                    .opacity(buttonsExpanded ? 1.0 : 0.0)
+                    
+                    if manager.isProcessing {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .offset(y: dropYOffset + 60)
+                    }
+                    
+                    if !manager.errorMessage.isEmpty {
+                        Text(manager.errorMessage)
+                            .foregroundColor(.red)
+                            .padding(8)
+                            .background(Color.black.opacity(0.7))
+                            .cornerRadius(8)
+                            .offset(y: dropYOffset + 60)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.65)) {
+                dropYOffset = 20
+                buttonsExpanded = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
+            if let window = notification.object as? NSWindow, window.isEqual(NSApplication.shared.keyWindow) == false {
+                if window is CaptureWindow && window.frame.size.width == 400 {
+                    onCancel()
+                }
+            }
+        }
+    }
+}
+
