@@ -1426,11 +1426,19 @@ class TextEditManager: ObservableObject {
                             if let topCandidate = obs.topCandidates(1).first {
                                 let ocrText = topCandidate.string.lowercased()
                                 let cleanOcr = ocrText.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+                                let ocrWords = ocrText.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count >= 6 }
+                                var fuzzyMatch = false
+                                for word in ocrWords {
+                                    if cleanTarget.contains(word) {
+                                        fuzzyMatch = true
+                                        break
+                                    }
+                                }
                                 
                                 let isMatch = (!cleanOcr.isEmpty && !cleanTarget.isEmpty) && 
                                               ((cleanOcr.count >= 5 && cleanTarget.contains(cleanOcr)) || 
                                                (cleanTarget.count >= 5 && cleanOcr.contains(cleanTarget)) || 
-                                               cleanOcr == cleanTarget)
+                                               cleanOcr == cleanTarget || fuzzyMatch)
                                 
                                 if isMatch {
                                     log("MATCH FOUND! OCR: \(ocrText)")
