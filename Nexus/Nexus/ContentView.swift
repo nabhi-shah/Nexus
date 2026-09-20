@@ -1665,11 +1665,25 @@ struct TextEditOverlayView: View {
     
     @State private var monitorHolder = EventMonitorHolder()
     
+    private func closeWithAnimation() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+            buttonsExpanded = false
+            isEditExpanded = false
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            withAnimation(.easeIn(duration: 0.15)) {
+                isVisible = false
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            onCancel()
+        }
+    }
     
     var body: some View {
         ZStack(alignment: .center) {
             Color.white.opacity(0.001) // Transparent background to catch clicks inside our large 500x200 window
-                .onTapGesture { onCancel() }
+                .onTapGesture { closeWithAnimation() }
                 
             VStack {
                 ZStack(alignment: .center) {
@@ -1683,7 +1697,7 @@ struct TextEditOverlayView: View {
                                 TextEditGlassButton(systemIcon: "phosphor_translate", title: "Rephrase", action: {
                                     manager.processText(action: "rephrase") { success, newText in
                                         if success, let newText = newText { 
-                                            onCancel()
+                                            closeWithAnimation()
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                         }
                                     }
@@ -1694,7 +1708,7 @@ struct TextEditOverlayView: View {
                                 TextEditGlassButton(systemIcon: "briefcase", title: "Formalize", action: {
                                     manager.processText(action: "formalize") { success, newText in
                                         if success, let newText = newText { 
-                                            onCancel()
+                                            closeWithAnimation()
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                         }
                                     }
@@ -1763,7 +1777,7 @@ struct TextEditOverlayView: View {
                             }
                             
                             if !isEditExpanded {
-                                TextEditGlassButton(systemIcon: "phosphor_x", action: { onCancel() }, isCloseButton: true, isBlackDot: !buttonsExpanded)
+                                TextEditGlassButton(systemIcon: "phosphor_x", action: { closeWithAnimation() }, isCloseButton: true, isBlackDot: !buttonsExpanded)
                                     .offset(x: buttonsExpanded ? 134 : 0)
                                     .glassEffectID("close", in: glassSpace)
                             } else {
@@ -1801,27 +1815,36 @@ struct TextEditOverlayView: View {
         .onAppear {
             monitorHolder.globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { event in
                 if event.type == .keyDown && event.keyCode == 53 {
-                    onCancel()
+                    closeWithAnimation()
                 } else if event.type == .leftMouseDown || event.type == .rightMouseDown {
-                    onCancel()
+                    let mouseLoc = NSEvent.mouseLocation
+                    let winWidth: CGFloat = 500
+                    let winHeight: CGFloat = 200
+                    let originX = manager.menuPosition.x - (winWidth / 2)
+                    let originY = manager.menuPosition.y - (winHeight / 2)
+                    let windowFrame = CGRect(x: originX, y: originY, width: winWidth, height: winHeight)
+                    
+                    if !windowFrame.contains(mouseLoc) {
+                        closeWithAnimation()
+                    }
                 }
             }
             monitorHolder.localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
                 if event.keyCode == 53 {
-                    onCancel()
+                    closeWithAnimation()
                     return nil
                 }
                 return event
             }
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                withAnimation(.easeOut(duration: 0.2)) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                withAnimation(.easeOut(duration: 0.12)) {
                     isVisible = true
                 }
             }
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
                     buttonsExpanded = true
                 }
             }
@@ -1833,7 +1856,7 @@ struct TextEditOverlayView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
             if let window = notification.object as? NSWindow, window.isEqual(NSApplication.shared.keyWindow) == false {
                 if window is CaptureWindow && window.frame.size.width == 500 {
-                    onCancel()
+                    closeWithAnimation()
                 }
             }
         }
