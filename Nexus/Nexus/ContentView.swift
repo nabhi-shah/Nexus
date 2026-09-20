@@ -1559,40 +1559,46 @@ struct TextEditGlassButton: View {
     var title: String? = nil
     var action: () -> Void
     var isCloseButton: Bool = false
+    var isBlackDot: Bool = false
     
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             ZStack {
-                if let t = title {
-                    Text(t)
-                        .font(.custom("Geist", size: 14).weight(.medium))
-                        .foregroundColor(.white)
-                } else {
-                    if systemIcon.hasPrefix("phosphor_") {
-                        Image(systemIcon)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 18, height: 18)
-                            .foregroundColor(isCloseButton ? .red : .white)
+                if !isBlackDot {
+                    if let t = title {
+                        Text(t)
+                            .font(.custom("Geist", size: 14).weight(.medium))
+                            .foregroundColor(.white)
+                            .transition(.opacity.animation(.easeInOut(duration: 0.3)))
                     } else {
-                        Image(systemName: systemIcon)
-                            .font(.custom("Geist", size: 16).weight(.semibold))
-                            .foregroundColor(isCloseButton ? .red : .white)
+                        if systemIcon.hasPrefix("phosphor_") {
+                            Image(systemIcon)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 18, height: 18)
+                                .foregroundColor(isCloseButton ? .red : .white)
+                                .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+                        } else {
+                            Image(systemName: systemIcon)
+                                .font(.custom("Geist", size: 16).weight(.semibold))
+                                .foregroundColor(isCloseButton ? .red : .white)
+                                .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+                        }
                     }
                 }
             }
-            .frame(width: title != nil ? 90 : 44, height: 44)
+            .frame(width: (title != nil && !isBlackDot) ? 90 : 44, height: 44)
         }
         .buttonStyle(PlainButtonStyle())
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isCloseButton ? Color.red.opacity(isHovering ? 0.8 : 0.4) : Color.black.opacity(isHovering ? 0.6 : 0.4))
+                .fill(isBlackDot ? Color.black : (isCloseButton ? Color.red.opacity(isHovering ? 0.8 : 0.4) : Color.black.opacity(isHovering ? 0.6 : 0.4)))
         )
         .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.3), lineWidth: 1))
-        .shadow(color: .black.opacity(0.2), radius: 5)
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(isBlackDot ? Color.clear : Color.white.opacity(0.3), lineWidth: 1))
+        .shadow(color: isBlackDot ? .clear : .black.opacity(0.2), radius: 5)
         .focusable(false)
         .onHover { hovering in
             isHovering = hovering
@@ -1672,7 +1678,7 @@ struct TextEditOverlayView: View {
                         .opacity(buttonsExpanded ? 0 : 1)
                     
                     GlassEffectContainer(spacing: 12) {
-                        HStack(spacing: 12) {
+                        ZStack(alignment: .center) {
                             if !isEditExpanded {
                                 TextEditGlassButton(systemIcon: "phosphor_translate", title: "Rephrase", action: {
                                     manager.processText(action: "rephrase") { success, newText in
@@ -1681,9 +1687,9 @@ struct TextEditOverlayView: View {
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                         }
                                     }
-                                })
+                                }, isBlackDot: !buttonsExpanded)
+                                .offset(x: buttonsExpanded ? -101 : 0)
                                 .glassEffectID("rephrase", in: glassSpace)
-                                .transition(.scale.combined(with: .opacity))
                                 
                                 TextEditGlassButton(systemIcon: "briefcase", title: "Formalize", action: {
                                     manager.processText(action: "formalize") { success, newText in
@@ -1692,79 +1698,86 @@ struct TextEditOverlayView: View {
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                         }
                                     }
-                                })
+                                }, isBlackDot: !buttonsExpanded)
+                                .offset(x: buttonsExpanded ? 1 : 0)
                                 .glassEffectID("formalize", in: glassSpace)
-                                .transition(.scale.combined(with: .opacity))
                             }
                             
                             if isEditExpanded {
-                                HStack {
-                                    TextField("Edit instruction...", text: $customPrompt, axis: .vertical)
-                                        .lineLimit(1...6)
-                                        .textFieldStyle(PlainTextFieldStyle())
-                                        .font(.custom("Geist", size: 14))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .mask(LinearGradient(gradient: Gradient(stops: [.init(color: .clear, location: 0.0), .init(color: .black, location: 0.15), .init(color: .black, location: 0.85), .init(color: .clear, location: 1.0)]), startPoint: .top, endPoint: .bottom))
-                                        .onSubmit {
-                                            manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
-                                                if success, let newText = newText { 
-                                                    onCancel()
-                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
+                                ZStack {
+                                    if !buttonsExpanded {
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.black).frame(width: 44, height: 44)
+                                    } else {
+                                        HStack {
+                                            TextField("Edit instruction...", text: $customPrompt, axis: .vertical)
+                                                .lineLimit(1...6)
+                                                .textFieldStyle(PlainTextFieldStyle())
+                                                .font(.custom("Geist", size: 14))
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 8)
+                                                .mask(LinearGradient(gradient: Gradient(stops: [.init(color: .clear, location: 0.0), .init(color: .black, location: 0.15), .init(color: .black, location: 0.85), .init(color: .clear, location: 1.0)]), startPoint: .top, endPoint: .bottom))
+                                                .onSubmit {
+                                                    manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
+                                                        if success, let newText = newText { 
+                                                            onCancel()
+                                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
+                                                        }
+                                                    }
                                                 }
+                                            
+                                            Button(action: {
+                                                manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
+                                                    if success, let newText = newText { 
+                                                        onCancel()
+                                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
+                                                    }
+                                                }
+                                            }) {
+                                                Image(systemName: "arrow.up.circle.fill")
+                                                    .foregroundColor(.white)
+                                                    .font(.custom("Geist", size: 20))
                                             }
+                                            .buttonStyle(PlainButtonStyle())
+                                            .padding(.trailing, 8)
                                         }
-                                    
-                                    Button(action: {
-                                        manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
-                                            if success, let newText = newText { 
-                                                onCancel()
-                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
-                                            }
-                                        }
-                                    }) {
-                                        Image(systemName: "arrow.up.circle.fill")
-                                            .foregroundColor(.white)
-                                            .font(.custom("Geist", size: 20))
+                                        .transition(.opacity.animation(.easeInOut(duration: 0.3)))
                                     }
-                                    .buttonStyle(PlainButtonStyle())
-                                    .padding(.trailing, 8)
                                 }
-                                .frame(width: 200).frame(minHeight: 44)
-                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.black.opacity(0.4)))
+                                .frame(width: !buttonsExpanded ? 44 : 200).frame(minHeight: 44)
+                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(!buttonsExpanded ? Color.black : Color.black.opacity(0.4)))
                                 .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white.opacity(0.3), lineWidth: 1))
-                                .shadow(color: .black.opacity(0.2), radius: 5)
+                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(!buttonsExpanded ? Color.clear : Color.white.opacity(0.3), lineWidth: 1))
+                                .shadow(color: !buttonsExpanded ? .clear : .black.opacity(0.2), radius: 5)
                                 .matchedGeometryEffect(id: "edit_m", in: glassSpace)
+                                .offset(x: buttonsExpanded ? -28 : 0)
                             } else {
                                 TextEditGlassButton(systemIcon: "phosphor_cursor-text", action: {
                                     withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                                         isEditExpanded.toggle()
                                     }
-                                })
+                                }, isBlackDot: !buttonsExpanded)
+                                .offset(x: buttonsExpanded ? 78 : 0)
                                 .glassEffectID("edit", in: glassSpace)
                                 .matchedGeometryEffect(id: "edit_m", in: glassSpace)
                             }
                             
                             if !isEditExpanded {
-                                TextEditGlassButton(systemIcon: "phosphor_x", action: { onCancel() }, isCloseButton: true)
+                                TextEditGlassButton(systemIcon: "phosphor_x", action: { onCancel() }, isCloseButton: true, isBlackDot: !buttonsExpanded)
+                                    .offset(x: buttonsExpanded ? 134 : 0)
                                     .glassEffectID("close", in: glassSpace)
-                                    .transition(.scale.combined(with: .opacity))
                             } else {
                                 TextEditGlassButton(systemIcon: "phosphor_x", action: {
                                     withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                                         isEditExpanded = false
                                         customPrompt = ""
                                     }
-                                }, isCloseButton: true)
+                                }, isCloseButton: true, isBlackDot: !buttonsExpanded)
+                                    .offset(x: buttonsExpanded ? 100 : 0)
                                     .glassEffectID("close", in: glassSpace)
-                                    .transition(.scale.combined(with: .opacity))
                             }
                         }
                     }
-                    .scaleEffect(buttonsExpanded ? 1.0 : 0.01, anchor: .center)
-                    .opacity(buttonsExpanded ? 1.0 : 0.0)
                     
                     if manager.isProcessing {
                         ProgressView()
@@ -1781,6 +1794,8 @@ struct TextEditOverlayView: View {
                             .padding(.top, 80)
                     }
                 }
+                .scaleEffect(isVisible ? 1.0 : 0.01, anchor: .center)
+                .opacity(isVisible ? 1.0 : 0.0)
             }
         }
         .onAppear {
@@ -1799,8 +1814,16 @@ struct TextEditOverlayView: View {
                 return event
             }
             
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.65)) {
-                buttonsExpanded = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    isVisible = true
+                }
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                    buttonsExpanded = true
+                }
             }
         }
         .onDisappear {
