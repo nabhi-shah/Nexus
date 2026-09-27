@@ -519,6 +519,7 @@ class LensScraper: ObservableObject {
     @Published var overview: String = ""
     @Published var isOverviewLoading: Bool = false
     private var overviewTask: Task<Void, Never>? = nil
+    private var searchDataTask: URLSessionDataTask? = nil
     @Published var isScraping: Bool = false {
         didSet {
             if !isScraping {
@@ -532,6 +533,10 @@ class LensScraper: ObservableObject {
     }
     @Published var statusText: String = ""
     @Published var capturedImage: NSImage? = nil
+    
+    var lastImageId: String? = nil
+    var lastImageData: Data? = nil
+    var currentSearchText: String = ""
     
     var useMockData: Bool = false
     var serpApiKey: String {
@@ -555,6 +560,10 @@ class LensScraper: ObservableObject {
     func startCapture() {
         DispatchQueue.main.async {
             self.overviewTask?.cancel()
+            self.searchDataTask?.cancel()
+            self.lastImageId = nil
+            self.lastImageData = nil
+            self.currentSearchText = ""
             self.mainWindow?.orderOut(nil) // Hide main window while capturing
             self.isScraping = true
             self.statusText = self.useMockData ? "Capturing (Mock Mode)..." : "Capturing screen..."
@@ -745,6 +754,16 @@ class LensScraper: ObservableObject {
             return
         }
         
+        self.lastImageData = imageData
+        uploadDataToSerpApi(imageData: imageData, query: self.currentSearchText.isEmpty ? nil : self.currentSearchText)
+    }
+    
+    private func uploadDataToSerpApi(imageData: Data, query: String? = nil) {
+        DispatchQueue.main.async {
+            self.isScraping = true
+            self.statusText = "Uploading to Google Lens..."
+        }
+        
         let payload = compressImageUnder500KB(data: imageData)
         
         var request = URLRequest(url: URL(string: "https://serpapi.com/image")!)
@@ -784,8 +803,8 @@ class LensScraper: ObservableObject {
                 }
                 
                 if let imageId = imgResponse.image_id {
-                    let base64String = imageData.base64EncodedString()
-                    self?.querySerpApi(imageId: imageId, imageBase64: base64String)
+                    self?.lastImageId = imageId
+                    self?.querySerpApi(imageId: imageId, query: query)
                 } else {
                     DispatchQueue.main.async {
                         self?.statusText = "No image_id returned."
@@ -802,21 +821,36 @@ class LensScraper: ObservableObject {
         task.resume()
     }
     
-    private func querySerpApi(imageId: String, imageBase64: String) {
+    func querySerpApi(imageId: String, query: String? = nil) {
         DispatchQueue.main.async {
-            self.statusText = "Searching Google Lens..."
+            self.isScraping = true
+            let qTrim = query?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let q = qTrim, !q.isEmpty {
+                self.statusText = "Searching Google Lens for '\(q)'..."
+            } else {
+                self.statusText = "Searching Google Lens..."
+            }
         }
         
+        searchDataTask?.cancel()
+        
         var components = URLComponents(string: "https://serpapi.com/search.json")!
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "engine", value: "google_lens"),
             URLQueryItem(name: "image_id", value: imageId),
             URLQueryItem(name: "no_cache", value: "true"),
             URLQueryItem(name: "api_key", value: serpApiKey)
         ]
         
-        let request = URLRequest(url: components.url!)
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        if let q = query?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty {
+            queryItems.append(URLQueryItem(name: "q", value: q))
+        }
+        
+        components.queryItems = queryItems
+        
+        guard let url = components.url else { return }
+        let request = URLRequest(url: url)
+        searchDataTask = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let data = data else {
                 DispatchQueue.main.async {
                     self?.statusText = "API request failed."
@@ -841,7 +875,42 @@ class LensScraper: ObservableObject {
                 }
             }
         }
-        task.resume()
+        searchDataTask?.resume()
+    }
+    
+    func searchWithCombinedQuery(text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != self.currentSearchText else { return }
+        self.currentSearchText = trimmed
+        
+        // 1. Refresh Gemini AI overview specifically addressing the new text query
+        if let img = self.capturedImage {
+            self.generateGeminiOverviewStream(image: img, query: trimmed.isEmpty ? nil : trimmed)
+        }
+        
+        // 2. Mock mode handling
+        if useMockData {
+            self.isScraping = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                if !trimmed.isEmpty {
+                    self.matches = [
+                        VisualMatch(title: "\(trimmed) - Related Result 1", source: "Google Lens", link: "https://google.com", thumbnail: nil),
+                        VisualMatch(title: "\(trimmed) - Related Result 2", source: "Google Lens", link: "https://google.com", thumbnail: nil)
+                    ]
+                } else {
+                    self.loadMockData()
+                }
+                self.isScraping = false
+            }
+            return
+        }
+        
+        // 3. Query SerpApi Google Lens with image + text query
+        if let imageId = self.lastImageId {
+            self.querySerpApi(imageId: imageId, query: trimmed.isEmpty ? nil : trimmed)
+        } else if let imageData = self.lastImageData ?? self.capturedImage?.tiffRepresentation {
+            self.uploadDataToSerpApi(imageData: imageData, query: trimmed.isEmpty ? nil : trimmed)
+        }
     }
     
     private func prepareImageForGemini(image: NSImage) -> (base64: String, mimeType: String)? {
@@ -865,7 +934,7 @@ class LensScraper: ObservableObject {
         return (jpeg.base64EncodedString(), "image/jpeg")
     }
     
-    func generateGeminiOverviewStream(image: NSImage) {
+    func generateGeminiOverviewStream(image: NSImage, query: String? = nil) {
         overviewTask?.cancel()
         
         guard !geminiApiKey.isEmpty else {
@@ -887,7 +956,12 @@ class LensScraper: ObservableObject {
             self.isOverviewLoading = true
         }
         
-        let prompt = "Analyze this image and identify what is shown. Provide a concise, clear, and helpful overview (1-2 sentences) of what it is, its key features, and context."
+        let prompt: String
+        if let q = query?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty {
+            prompt = "Analyze this image specifically focusing on or answering: '\(q)'. Provide a concise, clear, and helpful overview (1-2 sentences) directly addressing this query in the context of what is shown in the image."
+        } else {
+            prompt = "Analyze this image and identify what is shown. Provide a concise, clear, and helpful overview (1-2 sentences) of what it is, its key features, and context."
+        }
         
         let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse&key=\(geminiApiKey)")!
         var request = URLRequest(url: url)
@@ -1638,23 +1712,37 @@ struct ContentView: View {
                             .textFieldStyle(PlainTextFieldStyle())
                             .font(.system(size: 15))
                             .focused($isSearchFocused)
+                            .onSubmit {
+                                searchTask?.cancel()
+                                scraper.searchWithCombinedQuery(text: searchText)
+                            }
                             .onChange(of: searchText) { newValue in
                                 searchTask?.cancel()
-                                searchTask = Task {
-                                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                                    guard !Task.isCancelled else { return }
-                                    
-                                    if searchText == newValue && !newValue.isEmpty {
-                                        DispatchQueue.main.async {
-                                            scraper.isScraping = true
-                                            scraper.statusText = "Searching Google Lens with text..."
-                                        }
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                            scraper.isScraping = false
+                                if newValue.isEmpty {
+                                    scraper.searchWithCombinedQuery(text: "")
+                                } else {
+                                    searchTask = Task {
+                                        try? await Task.sleep(nanoseconds: 650_000_000)
+                                        guard !Task.isCancelled else { return }
+                                        await MainActor.run {
+                                            scraper.searchWithCombinedQuery(text: newValue)
                                         }
                                     }
                                 }
                             }
+                        
+                        if !searchText.isEmpty {
+                            Button(action: {
+                                searchText = ""
+                                searchTask?.cancel()
+                                scraper.searchWithCombinedQuery(text: "")
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.white.opacity(0.45))
+                                    .font(.system(size: 14))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
                     }
                     .padding(8)
                     .background(
@@ -1753,6 +1841,10 @@ struct ContentView: View {
             if scraper.matches.isEmpty {
                 animatedCardIds.removeAll()
             }
+        }
+        .onChange(of: scraper.capturedImage) { _ in
+            searchText = ""
+            scraper.currentSearchText = ""
         }
         .ignoresSafeArea(.all, edges: .top)
         .frame(minWidth: 420, maxWidth: .infinity, minHeight: 500, maxHeight: .infinity)
