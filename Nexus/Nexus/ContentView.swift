@@ -1251,36 +1251,40 @@ struct StreamingBlurTextRenderer: TextRenderer {
 
 // MARK: - Shimmering Skeleton Loader
 struct SummarySkeletonLoaderView: View {
-    @State private var phase: CGFloat = -1.0
+    @State private var phase: CGFloat = -0.8
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+                .fill(Color.white.opacity(0.05))
                 .frame(maxWidth: .infinity)
                 .frame(height: 16)
                 .padding(.trailing, 24)
             
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+                .fill(Color.white.opacity(0.05))
                 .frame(width: 250, height: 16)
         }
         .padding(.vertical, 6)
         .overlay(
             GeometryReader { geo in
+                let shimmerWidth = max(240, geo.size.width * 0.75)
                 LinearGradient(
                     gradient: Gradient(stops: [
                         .init(color: .clear, location: 0.0),
-                        .init(color: Color.white.opacity(0.16), location: 0.45),
-                        .init(color: Color.white.opacity(0.28), location: 0.5),
-                        .init(color: Color.white.opacity(0.16), location: 0.55),
+                        .init(color: Color.white.opacity(0.02), location: 0.15),
+                        .init(color: Color.white.opacity(0.06), location: 0.32),
+                        .init(color: Color.white.opacity(0.12), location: 0.50),
+                        .init(color: Color.white.opacity(0.06), location: 0.68),
+                        .init(color: Color.white.opacity(0.02), location: 0.85),
                         .init(color: .clear, location: 1.0)
                     ]),
                     startPoint: .leading,
                     endPoint: .trailing
                 )
-                .frame(width: max(160, geo.size.width * 0.55))
-                .offset(x: phase * geo.size.width)
+                .frame(width: shimmerWidth)
+                .blur(radius: 6)
+                .offset(x: phase * (geo.size.width + shimmerWidth * 0.5))
                 .blendMode(.plusLighter)
             }
             .mask(
@@ -1297,8 +1301,8 @@ struct SummarySkeletonLoaderView: View {
             )
         )
         .onAppear {
-            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-                phase = 1.4
+            withAnimation(.linear(duration: 2.0).repeatForever(autoreverses: false)) {
+                phase = 1.2
             }
         }
     }
