@@ -517,6 +517,8 @@ struct CaptureOverlayView: View {
 class LensScraper: ObservableObject {
     @Published var matches: [VisualMatch] = []
     @Published var overview: String = ""
+    @Published var isOverviewLoading: Bool = false
+    private var overviewTask: Task<Void, Never>? = nil
     @Published var isScraping: Bool = false {
         didSet {
             if !isScraping {
@@ -552,11 +554,13 @@ class LensScraper: ObservableObject {
     
     func startCapture() {
         DispatchQueue.main.async {
+            self.overviewTask?.cancel()
             self.mainWindow?.orderOut(nil) // Hide main window while capturing
             self.isScraping = true
             self.statusText = self.useMockData ? "Capturing (Mock Mode)..." : "Capturing screen..."
             self.matches = []
             self.overview = ""
+            self.isOverviewLoading = false
             self.showCaptureOverlay()
         }
     }
@@ -617,6 +621,11 @@ class LensScraper: ObservableObject {
                     if FileManager.default.fileExists(atPath: tempFilePath), let img = NSImage(contentsOfFile: tempFilePath) {
                         manager.capturedImage = img
                         self?.capturedImage = img
+                        
+                        // Kick off Gemini streaming overview immediately in parallel!
+                        if self?.useMockData == false {
+                            self?.generateGeminiOverviewStream(image: img)
+                        }
                     }
                     manager.imagePosition = CGPoint(x: rect.midX, y: rect.midY)
                     manager.imageScale = 1.0
@@ -776,8 +785,6 @@ class LensScraper: ObservableObject {
                 
                 if let imageId = imgResponse.image_id {
                     let base64String = imageData.base64EncodedString()
-                    // Start Gemini overview in parallel with SerpApi search
-                    self?.generateGeminiOverview(imageBase64: base64String)
                     self?.querySerpApi(imageId: imageId, imageBase64: base64String)
                 } else {
                     DispatchQueue.main.async {
@@ -837,14 +844,52 @@ class LensScraper: ObservableObject {
         task.resume()
     }
     
-    private func generateGeminiOverview(imageBase64: String, matches: [VisualMatch] = []) {
+    private func prepareImageForGemini(image: NSImage) -> (base64: String, mimeType: String)? {
+        var targetSize = image.size
+        let maxDim: CGFloat = 800
+        if max(targetSize.width, targetSize.height) > maxDim {
+            let ratio = maxDim / max(targetSize.width, targetSize.height)
+            targetSize = NSSize(width: max(1, targetSize.width * ratio), height: max(1, targetSize.height * ratio))
+        }
+        
+        let resized = NSImage(size: targetSize)
+        resized.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: targetSize), from: NSRect(origin: .zero, size: image.size), operation: .copy, fraction: 1.0)
+        resized.unlockFocus()
+        
+        guard let tiff = resized.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.7]) else {
+            return nil
+        }
+        return (jpeg.base64EncodedString(), "image/jpeg")
+    }
+    
+    func generateGeminiOverviewStream(image: NSImage) {
+        overviewTask?.cancel()
+        
         guard !geminiApiKey.isEmpty else {
+            DispatchQueue.main.async {
+                self.isOverviewLoading = false
+            }
             return
+        }
+        
+        guard let payload = prepareImageForGemini(image: image) else {
+            DispatchQueue.main.async {
+                self.isOverviewLoading = false
+            }
+            return
+        }
+        
+        DispatchQueue.main.async {
+            self.overview = ""
+            self.isOverviewLoading = true
         }
         
         let prompt = "Analyze this image and identify what is shown. Provide a concise, clear, and helpful overview (1-2 sentences) of what it is, its key features, and context."
         
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=\(geminiApiKey)")!
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse&key=\(geminiApiKey)")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -855,53 +900,88 @@ class LensScraper: ObservableObject {
                     "parts": [
                         ["text": prompt],
                         ["inlineData": [
-                            "mimeType": "image/png",
-                            "data": imageBase64
+                            "mimeType": payload.mimeType,
+                            "data": payload.base64
                         ]]
                     ]
+                ]
+            ],
+            "generationConfig": [
+                "thinkingConfig": [
+                    "thinkingBudget": 0
                 ]
             ]
         ]
         
         request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody)
         
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let data = data, error == nil else { return }
-            
+        overviewTask = Task { [weak self] in
             do {
-                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    if let candidates = json["candidates"] as? [[String: Any]],
-                       let firstCandidate = candidates.first,
-                       let content = firstCandidate["content"] as? [String: Any],
-                       let parts = content["parts"] as? [[String: Any]],
-                       let firstPart = parts.first,
-                       let text = firstPart["text"] as? String {
-                        DispatchQueue.main.async {
-                            withAnimation(.easeOut(duration: 0.35)) {
-                                self?.overview = text
-                            }
-                            // If visual matches have already arrived, turn off the beam
-                            if self?.matches.isEmpty == false {
-                                self?.isScraping = false
-                            }
+                let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                    await MainActor.run {
+                        self?.isOverviewLoading = false
+                    }
+                    return
+                }
+                
+                for try await line in bytes.lines {
+                    guard !Task.isCancelled else { return }
+                    if line.hasPrefix("data: ") {
+                        let jsonStr = String(line.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !jsonStr.isEmpty,
+                              let data = jsonStr.data(using: .utf8),
+                              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              let candidates = json["candidates"] as? [[String: Any]],
+                              let first = candidates.first,
+                              let content = first["content"] as? [String: Any],
+                              let parts = content["parts"] as? [[String: Any]],
+                              let textPart = parts.first?["text"] as? String,
+                              !textPart.isEmpty else {
+                            continue
+                        }
+                        
+                        await MainActor.run {
+                            self?.overview.append(textPart)
                         }
                     }
                 }
-            } catch { }
+                
+                await MainActor.run {
+                    self?.isOverviewLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self?.isOverviewLoading = false
+                }
+            }
         }
-        task.resume()
     }
     
     private func loadMockData() {
-        // 1. AI overview arrives first (0.4s) while the beam is still actively running!
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            withAnimation(.easeOut(duration: 0.35)) {
-                self.overview = "Based on the visual matches, this appears to be the new Apple MacBook Pro featuring the M3 Max chip in the Space Black color finish."
+        self.overview = ""
+        self.isOverviewLoading = true
+        
+        let fullMock = "Based on the visual matches, this appears to be the new Apple MacBook Pro featuring the M3 Max chip in the Space Black color finish."
+        let words = fullMock.split(separator: " ").map(String.init)
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self = self else { return }
+            var idx = 0
+            Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] t in
+                guard let self = self else { t.invalidate(); return }
+                if idx < words.count {
+                    let chunk = words[idx..<min(idx + 2, words.count)].joined(separator: " ")
+                    self.overview += (self.overview.isEmpty ? "" : " ") + chunk
+                    idx += 2
+                } else {
+                    t.invalidate()
+                    self.isOverviewLoading = false
+                }
             }
         }
         
-        // 2. Visual matches arrive from SerpApi later (1.3s), and the beam turns off
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             withAnimation(.easeOut(duration: 0.35)) {
                 self.matches = [
                     VisualMatch(title: "Apple MacBook Pro M3 Max - 16-inch", source: "Apple", link: "https://apple.com/macbook-pro", thumbnail: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/mbp16-spaceblack-select-202310?wid=904&hei=840&fmt=jpeg&qlt=90&.v=1698169226604"),
@@ -1088,6 +1168,178 @@ struct BorderBeamView: View {
     }
 }
 
+// MARK: - Streaming Blur Text Renderer
+@available(macOS 14.0, *)
+struct StreamingBlurTextRenderer: TextRenderer {
+    var revealedCount: Int
+    var totalChars: Int
+    var blurWindow: Int = 6
+    
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        if revealedCount >= totalChars + blurWindow {
+            for line in layout {
+                context.draw(line)
+            }
+            return
+        }
+        
+        var glyphIndex = 0
+        for line in layout {
+            for run in line {
+                for glyph in run {
+                    if glyphIndex < revealedCount {
+                        let distanceToLeading = (revealedCount - 1) - glyphIndex
+                        if distanceToLeading < blurWindow {
+                            let progress = Double(distanceToLeading) / Double(blurWindow)
+                            let blurRadius = (1.0 - progress) * 4.0
+                            let opacity = 0.35 + progress * 0.65
+                            
+                            var subContext = context
+                            subContext.opacity = opacity
+                            if blurRadius > 0.4 {
+                                subContext.addFilter(.blur(radius: blurRadius))
+                            }
+                            subContext.draw(glyph)
+                        } else {
+                            context.draw(glyph)
+                        }
+                    }
+                    glyphIndex += 1
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Shimmering Skeleton Loader
+struct SummarySkeletonLoaderView: View {
+    @State private var phase: CGFloat = -1.0
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+                .frame(maxWidth: .infinity)
+                .frame(height: 16)
+                .padding(.trailing, 24)
+            
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 250, height: 16)
+        }
+        .padding(.vertical, 6)
+        .overlay(
+            GeometryReader { geo in
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: Color.white.opacity(0.16), location: 0.45),
+                        .init(color: Color.white.opacity(0.28), location: 0.5),
+                        .init(color: Color.white.opacity(0.16), location: 0.55),
+                        .init(color: .clear, location: 1.0)
+                    ]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: max(160, geo.size.width * 0.55))
+                .offset(x: phase * geo.size.width)
+                .blendMode(.plusLighter)
+            }
+            .mask(
+                VStack(alignment: .leading, spacing: 10) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 16)
+                        .padding(.trailing, 24)
+                    
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .frame(width: 250, height: 16)
+                }
+                .padding(.vertical, 6)
+            )
+        )
+        .onAppear {
+            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                phase = 1.4
+            }
+        }
+    }
+}
+
+// MARK: - Streaming AI Overview View
+struct StreamingOverviewView: View {
+    var fullText: String
+    var isLoading: Bool
+    
+    @State private var revealedCount: Int = 0
+    @State private var tickerTask: Task<Void, Never>? = nil
+    private let blurWindow: Int = 6
+    
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if fullText.isEmpty && isLoading {
+                SummarySkeletonLoaderView()
+                    .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+            } else if !fullText.isEmpty {
+                Text(fullText)
+                    .font(.custom("Averia Serif Libre", size: 20))
+                    .foregroundColor(.primary)
+                    .textRenderer(StreamingBlurTextRenderer(revealedCount: revealedCount, totalChars: fullText.count, blurWindow: blurWindow))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.opacity.animation(.easeOut(duration: 0.25)))
+            }
+        }
+        .padding(.top, 4)
+        .padding(.bottom, 2)
+        .onChange(of: fullText) { newText in
+            startOrAdvanceTicker(targetCount: newText.count)
+        }
+        .onAppear {
+            if !fullText.isEmpty {
+                startOrAdvanceTicker(targetCount: fullText.count)
+            }
+        }
+        .onDisappear {
+            tickerTask?.cancel()
+            tickerTask = nil
+        }
+    }
+    
+    private func startOrAdvanceTicker(targetCount: Int) {
+        if targetCount == 0 {
+            tickerTask?.cancel()
+            revealedCount = 0
+            return
+        }
+        
+        if tickerTask == nil || tickerTask?.isCancelled == true {
+            tickerTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    let totalTarget = fullText.count + blurWindow
+                    if revealedCount < totalTarget {
+                        let remaining = fullText.count - revealedCount
+                        let step: Int
+                        if remaining > 25 {
+                            step = 3
+                        } else if remaining > 10 {
+                            step = 2
+                        } else {
+                            step = 1
+                        }
+                        
+                        revealedCount += step
+                        try? await Task.sleep(nanoseconds: 14_000_000)
+                    } else if !isLoading {
+                        break
+                    } else {
+                        try? await Task.sleep(nanoseconds: 20_000_000)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - UI
 struct ContentView: View {
     @StateObject var scraper: LensScraper
@@ -1132,7 +1384,7 @@ struct ContentView: View {
             GeometryReader { geo in
                 ScrollView(showsIndicators: false) {
                     Group {
-                        if scraper.matches.isEmpty && scraper.overview.isEmpty {
+                        if scraper.matches.isEmpty && scraper.overview.isEmpty && !scraper.isOverviewLoading {
                             if scraper.isScraping {
                                 // Clean canvas under sticky search bar while the whole-window beam glow is active
                                 VStack {
@@ -1173,14 +1425,8 @@ struct ContentView: View {
                                 // Balanced spacer below sticky search bar (reduced spacing)
                                 Color.clear.frame(height: scraper.capturedImage != nil ? 116 : 0)
                                 
-                                if !scraper.overview.isEmpty {
-                                    Text(scraper.overview)
-                                        .font(.custom("Averia Serif Libre", size: 20))
-                                        .foregroundColor(.primary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.top, scraper.capturedImage == nil ? 4 : 0)
-                                        .padding(.bottom, 2)
-                                        .transition(.opacity.combined(with: .move(edge: .top)).animation(.easeOut(duration: 0.35)))
+                                if !scraper.overview.isEmpty || scraper.isOverviewLoading {
+                                    StreamingOverviewView(fullText: scraper.overview, isLoading: scraper.isOverviewLoading)
                                 }
                             
                                 // Masonry Grid with Fixed Column Widths
