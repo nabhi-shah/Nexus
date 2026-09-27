@@ -2554,20 +2554,11 @@ struct TextEditGlassButton: View {
 }
 
 
-struct InputBoxHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 44
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        let next = nextValue()
-        if next > 0 {
-            value = next
-        }
-    }
-}
+
 
 struct TextEditGooeyBackground: View {
     var expanded: Bool
     var isEditExpanded: Bool
-    var inputBoxHeight: CGFloat = 44
     
     var body: some View {
         Canvas { context, size in
@@ -2604,15 +2595,14 @@ struct TextEditGooeyBackground: View {
                     .tag(2)
             }
             
-            // Symbol 3: Chat morphs to Input Box (expands in height anchored to bottom)
+            // Symbol 3: Chat morphs to Input Box
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .frame(
                     width: isEditExpanded ? 248 : 44,
-                    height: isEditExpanded ? inputBoxHeight : 44
+                    height: 44
                 )
                 .offset(
-                    x: expanded ? (isEditExpanded ? -22 : 80) : 0,
-                    y: isEditExpanded ? -(inputBoxHeight - 44) / 2 : 0
+                    x: expanded ? (isEditExpanded ? -22 : 80) : 0
                 )
                 .tag(3)
             
@@ -2656,7 +2646,6 @@ struct TextEditOverlayView: View {
     @State private var isEditExpanded = false
     @State private var customPrompt = ""
     @State private var isChatHovering = false
-    @State private var inputBoxHeight: CGFloat = 44
     @ObservedObject var manager = TextEditManager.shared
     
     @State private var monitorHolder = EventMonitorHolder()
@@ -2678,7 +2667,6 @@ struct TextEditOverlayView: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
             buttonsExpanded = false
             isEditExpanded = false
-            inputBoxHeight = 44
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             withAnimation(.easeIn(duration: 0.15)) {
@@ -2699,8 +2687,7 @@ struct TextEditOverlayView: View {
                 ZStack(alignment: .bottom) {
                     TextEditGooeyBackground(
                         expanded: buttonsExpanded,
-                        isEditExpanded: isEditExpanded,
-                        inputBoxHeight: isEditExpanded ? inputBoxHeight : 44
+                        isEditExpanded: isEditExpanded
                     )
                     .frame(width: 500, height: 200)
                     .allowsHitTesting(false)
@@ -2790,16 +2777,16 @@ struct TextEditOverlayView: View {
                                 .matchedGeometryEffect(id: "chat_morph", in: glassSpace)
                                 .glassEffectID("chat_morph", in: glassSpace)
                             } else {
-                                HStack(alignment: .bottom, spacing: 4) {
+                                ZStack(alignment: .bottomTrailing) {
                                     TextField("Edit instruction...", text: $customPrompt, axis: .vertical)
                                         .lineLimit(1...5)
                                         .textFieldStyle(PlainTextFieldStyle())
                                         .font(.custom("Geist", size: 14))
                                         .foregroundColor(.white)
+                                        .fixedSize(horizontal: false, vertical: true)
                                         .padding(.leading, 14)
-                                        .padding(.trailing, 4)
-                                        .padding(.top, 12)
-                                        .padding(.bottom, 12)
+                                        .padding(.trailing, 38)
+                                        .padding(.vertical, 13)
                                         .onSubmit {
                                             submitCustomPrompt()
                                         }
@@ -2827,11 +2814,7 @@ struct TextEditOverlayView: View {
                                 }
                                 .frame(width: 248)
                                 .frame(minHeight: 44, maxHeight: 115)
-                                .background(
-                                    GeometryReader { geo in
-                                        Color.clear.preference(key: InputBoxHeightKey.self, value: geo.size.height)
-                                    }
-                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 .background(
                                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                                         .fill(Color.black.opacity(0.45))
@@ -2855,7 +2838,6 @@ struct TextEditOverlayView: View {
                                         withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
                                             isEditExpanded = false
                                             customPrompt = ""
-                                            inputBoxHeight = 44
                                         }
                                     } else {
                                         closeWithAnimation()
@@ -2869,11 +2851,6 @@ struct TextEditOverlayView: View {
                         }
                     }
                     .padding(.bottom, 78)
-                    .onPreferenceChange(InputBoxHeightKey.self) { newHeight in
-                        if newHeight >= 44 && abs(newHeight - inputBoxHeight) > 0.5 {
-                            inputBoxHeight = newHeight
-                        }
-                    }
                     
                     if manager.isProcessing {
                         BorderBeamView(
@@ -2882,7 +2859,7 @@ struct TextEditOverlayView: View {
                             lineWidth: 2.0,
                             cornerRadius: 14
                         )
-                        .frame(width: isEditExpanded ? 248 : 320, height: isEditExpanded ? inputBoxHeight : 44)
+                        .frame(width: isEditExpanded ? 248 : 320, height: 44)
                         .offset(x: isEditExpanded ? (buttonsExpanded ? -22 : 0) : 0)
                         .padding(.bottom, 78)
                         
