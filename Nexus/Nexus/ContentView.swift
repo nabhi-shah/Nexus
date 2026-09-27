@@ -967,7 +967,7 @@ class LensScraper: ObservableObject {
         self.overview = ""
         self.isOverviewLoading = true
         
-        let fullMock = "Based on the visual matches, this appears to be the new Apple MacBook Pro featuring the M3 Max chip in the Space Black color finish."
+        let fullMock = "Based on the visual matches, this appears to be the new **Apple MacBook Pro** featuring the **M3 Max** chip in the Space Black color finish."
         let words = fullMock.split(separator: " ").map(String.init)
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
@@ -1304,6 +1304,37 @@ struct SummarySkeletonLoaderView: View {
     }
 }
 
+// MARK: - Markdown Bold Parser
+func parseBoldMarkdown(_ input: String, fontSize: CGFloat = 20, fontName: String = "Averia Serif Libre") -> AttributedString {
+    var text = input
+    
+    // Hide a solitary trailing "*" if it looks like the start of an incoming "**" delimiter during streaming
+    if text.hasSuffix("*") && !text.hasSuffix("**") {
+        let starCount = text.reduce(0) { $1 == "*" ? $0 + 1 : $0 }
+        if starCount % 2 != 0 {
+            text.removeLast()
+        }
+    }
+    
+    var result = AttributedString()
+    let parts = text.components(separatedBy: "**")
+    
+    for (index, part) in parts.enumerated() {
+        guard !part.isEmpty else { continue }
+        var attrPart = AttributedString(part)
+        if index % 2 == 1 {
+            // Text between ** and ** -> Bold
+            attrPart.font = .custom(fontName, size: fontSize).weight(.bold)
+            attrPart.inlinePresentationIntent = .stronglyEmphasized
+        } else {
+            // Regular text
+            attrPart.font = .custom(fontName, size: fontSize).weight(.regular)
+        }
+        result.append(attrPart)
+    }
+    return result
+}
+
 // MARK: - Streaming Ticker Manager
 @MainActor
 final class StreamingTicker: ObservableObject {
@@ -1313,12 +1344,11 @@ final class StreamingTicker: ObservableObject {
     private var runningTask: Task<Void, Never>? = nil
     private let blurWindow: Int = 6
     
-    func update(fullText: String, isLoading: Bool) {
-        let count = fullText.count
-        self.targetCount = count
-        self.isFinished = !isLoading && count > 0
+    func update(renderedCount: Int, isLoading: Bool) {
+        self.targetCount = renderedCount
+        self.isFinished = !isLoading && renderedCount > 0
         
-        if count == 0 {
+        if renderedCount == 0 {
             runningTask?.cancel()
             runningTask = nil
             revealedCount = 0
@@ -1327,7 +1357,7 @@ final class StreamingTicker: ObservableObject {
         
         // If results were already complete before view mounted, reveal immediately
         if !isLoading && runningTask == nil && revealedCount == 0 {
-            revealedCount = count + blurWindow
+            revealedCount = renderedCount + blurWindow
             return
         }
         
@@ -1384,30 +1414,38 @@ struct StreamingOverviewView: View {
     @StateObject private var ticker = StreamingTicker()
     private let blurWindow: Int = 6
     
+    private var formattedText: AttributedString {
+        parseBoldMarkdown(fullText, fontSize: 20, fontName: "Averia Serif Libre")
+    }
+    
+    private var renderedCount: Int {
+        formattedText.characters.count
+    }
+    
     var body: some View {
         ZStack(alignment: .topLeading) {
             if fullText.isEmpty && isLoading {
                 SummarySkeletonLoaderView()
                     .transition(.opacity.animation(.easeInOut(duration: 0.25)))
             } else if !fullText.isEmpty {
-                Text(fullText)
+                Text(formattedText)
                     .font(.custom("Averia Serif Libre", size: 20))
                     .foregroundColor(.primary)
-                    .textRenderer(StreamingBlurTextRenderer(revealedCount: ticker.revealedCount, totalChars: fullText.count, blurWindow: blurWindow))
+                    .textRenderer(StreamingBlurTextRenderer(revealedCount: ticker.revealedCount, totalChars: renderedCount, blurWindow: blurWindow))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .transition(.opacity.animation(.easeOut(duration: 0.25)))
             }
         }
         .padding(.top, 4)
         .padding(.bottom, 2)
-        .onChange(of: fullText) { newText in
-            ticker.update(fullText: newText, isLoading: isLoading)
+        .onChange(of: fullText) { _ in
+            ticker.update(renderedCount: renderedCount, isLoading: isLoading)
         }
         .onChange(of: isLoading) { newLoading in
-            ticker.update(fullText: fullText, isLoading: newLoading)
+            ticker.update(renderedCount: renderedCount, isLoading: newLoading)
         }
         .onAppear {
-            ticker.update(fullText: fullText, isLoading: isLoading)
+            ticker.update(renderedCount: renderedCount, isLoading: isLoading)
         }
         .onDisappear {
             ticker.cancel()
