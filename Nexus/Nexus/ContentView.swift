@@ -2,6 +2,9 @@ import Cocoa
 import SwiftUI
 import Foundation
 import Combine
+import QuartzCore
+import CoreImage
+import CoreImage.CIFilterBuiltins
 
 struct SerpApiResponse: Codable {
     let visual_matches: [VisualMatch]?
@@ -141,7 +144,7 @@ struct GooeyBackground: View {
             context.addFilter(.blur(radius: 12))
             
             context.drawLayer { ctx in
-                for i in 0..<6 {
+                for i in 0..<7 {
                     if let resolved = context.resolveSymbol(id: i) {
                         ctx.draw(resolved, at: CGPoint(x: size.width / 2, y: 22)) // Center of 44pt height view in top-aligned ZStack
                     }
@@ -157,11 +160,12 @@ struct GooeyBackground: View {
                 .tag(0)
             
             // Dots (move with dropYOffset)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -116 : 0, y: dropYOffset).tag(1)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -58 : 0, y: dropYOffset).tag(2)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(y: dropYOffset).tag(3)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 58 : 0, y: dropYOffset).tag(4)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 116 : 0, y: dropYOffset).tag(5)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -145 : 0, y: dropYOffset).tag(1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -87 : 0, y: dropYOffset).tag(2)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -29 : 0, y: dropYOffset).tag(3)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 29 : 0, y: dropYOffset).tag(4)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 87 : 0, y: dropYOffset).tag(5)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 145 : 0, y: dropYOffset).tag(6)
         }
     }
 }
@@ -218,31 +222,63 @@ struct RippleDistortionView: View {
     var cornerRadius: CGFloat
     @ObservedObject var manager: CaptureManager
     @State private var time: Float = 0.0
+    @State private var handlesOpacity: Double = 1.0
+    @State private var contentOpacity: Double = 1.0
     
     var body: some View {
+        let cSize = min(24, min(rect.width / 3, rect.height / 3))
+        let thick: CGFloat = 4
+        let col = Color.white.opacity(0.9)
+        let sh = Color.black.opacity(0.3)
+        
         ZStack {
             if let img = manager.capturedImage {
                 Image(nsImage: img)
                     .resizable()
                     .frame(width: rect.width, height: rect.height)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-                    .layerEffect(
-                        ShaderLibrary.chromaticRipple(
-                            .float(time),
-                            .float2(Float(rect.width / 2), Float(rect.height / 2)),
-                            .float(50.0), // very strong amplitude
-                            .float(25.0), // frequency
-                            .float(0.01) // decay (slower decay so it reaches edges strongly)
-                        ),
-                        maxSampleOffset: CGSize(width: 150, height: 150) // Allow for large coordinate shifts
-                    )
             } else {
                 Color.clear
             }
+            
+            // Screen grab handles and liquid glass borders that distort and dissolve with the ripple
+            ZStack {
+                Color.clear
+                    .frame(width: rect.width, height: rect.height)
+                    .glassEffect(.clear, in: .rect(cornerRadius: cornerRadius))
+                
+                CornerShape(radius: cornerRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round))
+                    .frame(width: cSize, height: cSize).offset(x: -rect.width/2 + cSize/2, y: -rect.height/2 + cSize/2).shadow(color: sh, radius: 2)
+                CornerShape(radius: cornerRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(90))
+                    .frame(width: cSize, height: cSize).offset(x: rect.width/2 - cSize/2, y: -rect.height/2 + cSize/2).shadow(color: sh, radius: 2)
+                CornerShape(radius: cornerRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(180))
+                    .frame(width: cSize, height: cSize).offset(x: rect.width/2 - cSize/2, y: rect.height/2 - cSize/2).shadow(color: sh, radius: 2)
+                CornerShape(radius: cornerRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(270))
+                    .frame(width: cSize, height: cSize).offset(x: -rect.width/2 + cSize/2, y: rect.height/2 - cSize/2).shadow(color: sh, radius: 2)
+            }
+            .opacity(handlesOpacity)
         }
+        .opacity(contentOpacity)
+        .frame(width: rect.width, height: rect.height)
+        .layerEffect(
+            ShaderLibrary.chromaticRipple(
+                .float(time),
+                .float2(Float(rect.width / 2), Float(rect.height / 2)),
+                .float(50.0), // very strong amplitude
+                .float(25.0), // frequency
+                .float(0.01) // decay (slower decay so it reaches edges strongly)
+            ),
+            maxSampleOffset: CGSize(width: 150, height: 150) // Allow for large coordinate shifts
+        )
         .onAppear {
-            withAnimation(.linear(duration: 2.0)) {
-                time = 2.0
+            withAnimation(.linear(duration: 1.5)) {
+                time = 1.5
+            }
+            withAnimation(.easeOut(duration: 0.35)) {
+                handlesOpacity = 0.0
+            }
+            withAnimation(.easeOut(duration: 0.4).delay(0.3)) {
+                contentOpacity = 0.0
             }
         }
         .allowsHitTesting(false)
@@ -314,32 +350,33 @@ struct CaptureOverlayView: View {
                 let dynamicRadius = min(16, min(r.width / 4, r.height / 4))
                 let cSize = min(24, min(r.width / 3, r.height / 3))
                 
-                // Apple Liquid Glass
-                Color.clear
-                    .frame(width: r.width, height: r.height)
-                    .glassEffect(.clear, in: .rect(cornerRadius: dynamicRadius))
-                
-                let thick: CGFloat = 4
-                let col = Color.white.opacity(0.9)
-                let sh = Color.black.opacity(0.3)
-                
-                CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round))
-                    .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: -r.height/2 + cSize/2).shadow(color: sh, radius: 2)
-                CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(90))
-                    .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: -r.height/2 + cSize/2).shadow(color: sh, radius: 2)
-                CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(180))
-                    .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
-                CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(270))
-                    .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
+                if !manager.isProcessing {
+                    // Apple Liquid Glass
+                    Color.clear
+                        .frame(width: r.width, height: r.height)
+                        .glassEffect(.clear, in: .rect(cornerRadius: dynamicRadius))
+                    
+                    let thick: CGFloat = 4
+                    let col = Color.white.opacity(0.9)
+                    let sh = Color.black.opacity(0.3)
+                    
+                    CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round))
+                        .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: -r.height/2 + cSize/2).shadow(color: sh, radius: 2)
+                    CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(90))
+                        .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: -r.height/2 + cSize/2).shadow(color: sh, radius: 2)
+                    CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(180))
+                        .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
+                    CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(270))
+                        .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
+                }
                 
                 if manager.isProcessing {
                     RippleDistortionView(rect: r, cornerRadius: dynamicRadius, manager: manager)
                         .frame(width: r.width, height: r.height)
-                        .transition(.opacity) // Prevent layout animation on insertion
+                        .transition(.identity) // Clean seamless swap
                 }
             }
-            .position(manager.isAnimatingToWindow ? manager.imagePosition : CGPoint(x: r.midX, y: r.midY))
-            .scaleEffect(manager.isAnimatingToWindow ? manager.imageScale : 1.0)
+            .position(CGPoint(x: r.midX, y: r.midY))
             .opacity(manager.isHoveringClose ? 0 : 1)
             
             // Dynamic Glass Island Drop
@@ -352,11 +389,28 @@ struct CaptureOverlayView: View {
                     GlassEffectContainer(spacing: 12) {
                         ZStack {
                             GlassMenuButton(icon: "phosphor_search", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? -116 : 0)
+                                .offset(x: buttonsExpanded ? -145 : 0)
                                 .glassEffectID("search", in: glassSpace)
                             
+                            GlassMenuButton(
+                                icon: "phosphor_clock-counter-clockwise",
+                                action: {
+                                    closeWithAnimation()
+                                    if let delegate = NSApplication.shared.delegate as? AppDelegate {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                            delegate.scraper.mainWindow?.makeKeyAndOrderFront(nil)
+                                            NSApp.activate(ignoringOtherApps: true)
+                                        }
+                                    }
+                                },
+                                manager: manager,
+                                isBlackDot: !buttonsExpanded
+                            )
+                            .offset(x: buttonsExpanded ? -87 : 0)
+                            .glassEffectID("history", in: glassSpace)
+                            
                             GlassMenuButton(icon: "phosphor_music-notes", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? -58 : 0)
+                                .offset(x: buttonsExpanded ? -29 : 0)
                                 .glassEffectID("music", in: glassSpace)
                             
                             GlassMenuButton(
@@ -369,14 +423,15 @@ struct CaptureOverlayView: View {
                                 manager: manager,
                                 isBlackDot: !buttonsExpanded
                             )
+                            .offset(x: buttonsExpanded ? 29 : 0)
                             .glassEffectID("center", in: glassSpace)
                             
                             GlassMenuButton(icon: "phosphor_cursor-text", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? 58 : 0)
+                                .offset(x: buttonsExpanded ? 87 : 0)
                                 .glassEffectID("text", in: glassSpace)
                             
                             GlassMenuButton(icon: "phosphor_x", action: { closeWithAnimation() }, manager: manager, isCloseButton: true, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? 116 : 0)
+                                .offset(x: buttonsExpanded ? 145 : 0)
                                 .glassEffectID("close", in: glassSpace)
                         }
                         .offset(y: dropYOffset)
@@ -474,10 +529,15 @@ class LensScraper: ObservableObject {
         }
     }
     @Published var statusText: String = ""
+    @Published var capturedImage: NSImage? = nil
     
-    let useMockData: Bool = true
-    let serpApiKey: String = ProcessInfo.processInfo.environment["SERPAPI_API_KEY"] ?? ""
-    let geminiApiKey: String = ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
+    var useMockData: Bool = false
+    var serpApiKey: String {
+        AppSecrets.serpApiKey
+    }
+    var geminiApiKey: String {
+        AppSecrets.geminiApiKey
+    }
     
     var captureWindows: [NSWindow] = []
     var eventMonitor: Any?
@@ -548,7 +608,7 @@ class LensScraper: ObservableObject {
         let tempFilePath = NSTemporaryDirectory().appending("nexus_temp.png")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = ["-x", "-R", "\(rect.minX),\(rect.minY),\(rect.width),\(rect.height)", tempFilePath]
+        process.arguments = ["-x", "-R", "\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))", tempFilePath]
         
         do {
             try process.run()
@@ -556,6 +616,7 @@ class LensScraper: ObservableObject {
                 DispatchQueue.main.async {
                     if FileManager.default.fileExists(atPath: tempFilePath), let img = NSImage(contentsOfFile: tempFilePath) {
                         manager.capturedImage = img
+                        self?.capturedImage = img
                     }
                     manager.imagePosition = CGPoint(x: rect.midX, y: rect.midY)
                     manager.imageScale = 1.0
@@ -569,8 +630,8 @@ class LensScraper: ObservableObject {
                         window.ignoresMouseEvents = true
                     }
                     
-                    // Wait for the ripple to finish (approx 1.0s)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    // Allow the ripple distortion & dissolve to play out (0.75s)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
                         guard let self = self else { return }
                         
                         // 1. Calculate Target Window Frame (Opposite side of screen)
@@ -589,37 +650,15 @@ class LensScraper: ObservableObject {
                         self.mainWindow?.setFrame(targetWindowRect, display: true)
                         self.mainWindow?.makeKeyAndOrderFront(nil)
                         
-                        // 3. Animate the image to the main window
-                        manager.isAnimatingToWindow = true
+                        // 3. Close capture overlay immediately (no flying screenshot movement)
+                        self.closeCaptureWindow()
                         
-                        // Calculate target position in overlay window's coordinates (SwiftUI top-left)
-                        let targetGlobalX = windowX + windowWidth / 2.0
-                        let targetGlobalY = windowY + windowHeight / 2.0
-                        let targetPos = manager.toLocal(CGPoint(x: targetGlobalX, y: targetGlobalY))
-                        
-                        // Scale down to fit inside the window width nicely
-                        let targetScale = min(1.0, (windowWidth - 60) / rect.width)
-                        
-                        // Curved animation (X and Y with different easing)
-                        withAnimation(.easeIn(duration: 0.6)) {
-                            manager.imagePosition.x = targetPos.x
-                        }
-                        withAnimation(.easeOut(duration: 0.6)) {
-                            manager.imagePosition.y = targetPos.y
-                            manager.imageScale = targetScale
-                        }
-                        
-                        // 4. Wait for curved animation to finish, then proceed with API call
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
-                            if self.useMockData {
-                                try? FileManager.default.removeItem(atPath: tempFilePath)
-                                self.loadMockData()
-                            } else {
-                                self.uploadToSerpApi(filePath: tempFilePath)
-                            }
-                            
-                            // Close capture window
-                            self.closeCaptureWindow()
+                        // 4. Start search immediately
+                        if self.useMockData {
+                            try? FileManager.default.removeItem(atPath: tempFilePath)
+                            self.loadMockData()
+                        } else {
+                            self.uploadToSerpApi(filePath: tempFilePath)
                         }
                     }
                 }
@@ -632,6 +671,48 @@ class LensScraper: ObservableObject {
         }
     }
     
+    private func compressImageUnder500KB(data: Data) -> (data: Data, mimeType: String, filename: String) {
+        guard let image = NSImage(data: data) else {
+            return (data, "image/png", "image.png")
+        }
+        
+        var targetSize = image.size
+        let maxDim: CGFloat = 1600
+        if max(targetSize.width, targetSize.height) > maxDim {
+            let ratio = maxDim / max(targetSize.width, targetSize.height)
+            targetSize = NSSize(width: targetSize.width * ratio, height: targetSize.height * ratio)
+        }
+        
+        let resized = NSImage(size: targetSize)
+        resized.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: targetSize), from: NSRect(origin: .zero, size: image.size), operation: .copy, fraction: 1.0)
+        resized.unlockFocus()
+        
+        guard let tiff = resized.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff) else {
+            return (data, "image/png", "image.png")
+        }
+        
+        for factor in [0.8, 0.65, 0.5, 0.35, 0.2] {
+            if let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: factor]), jpeg.count < 450_000 {
+                return (jpeg, "image/jpeg", "image.jpg")
+            }
+        }
+        
+        let smallSize = NSSize(width: min(targetSize.width, 900), height: min(targetSize.height, 900))
+        let smallResized = NSImage(size: smallSize)
+        smallResized.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: smallSize), from: NSRect(origin: .zero, size: image.size), operation: .copy, fraction: 1.0)
+        smallResized.unlockFocus()
+        if let smallTiff = smallResized.tiffRepresentation,
+           let smallBitmap = NSBitmapImageRep(data: smallTiff),
+           let smallJpeg = smallBitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.5]) {
+            return (smallJpeg, "image/jpeg", "image.jpg")
+        }
+        
+        return (data, "image/png", "image.png")
+    }
+
     private func uploadToSerpApi(filePath: String) {
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: filePath) else {
@@ -655,6 +736,8 @@ class LensScraper: ObservableObject {
             return
         }
         
+        let payload = compressImageUnder500KB(data: imageData)
+        
         var request = URLRequest(url: URL(string: "https://serpapi.com/image")!)
         request.httpMethod = "POST"
         let boundary = UUID().uuidString
@@ -666,9 +749,9 @@ class LensScraper: ObservableObject {
         body.append("\(serpApiKey)\r\n".data(using: .utf8)!)
         
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"image\"; filename=\"image.png\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: image/png\r\n\r\n".data(using: .utf8)!)
-        body.append(imageData)
+        body.append("Content-Disposition: form-data; name=\"image\"; filename=\"\(payload.filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(payload.mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(payload.data)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         request.httpBody = body
         
@@ -693,6 +776,8 @@ class LensScraper: ObservableObject {
                 
                 if let imageId = imgResponse.image_id {
                     let base64String = imageData.base64EncodedString()
+                    // Start Gemini overview in parallel with SerpApi search
+                    self?.generateGeminiOverview(imageBase64: base64String)
                     self?.querySerpApi(imageId: imageId, imageBase64: base64String)
                 } else {
                     DispatchQueue.main.async {
@@ -736,8 +821,10 @@ class LensScraper: ObservableObject {
             do {
                 let serpResponse = try JSONDecoder().decode(SerpApiResponse.self, from: data)
                 DispatchQueue.main.async {
-                    self?.matches = serpResponse.visual_matches ?? []
-                    self?.generateGeminiOverview(imageBase64: imageBase64, matches: serpResponse.visual_matches ?? [])
+                    withAnimation(.easeOut(duration: 0.35)) {
+                        self?.matches = serpResponse.visual_matches ?? []
+                    }
+                    self?.isScraping = false
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -750,27 +837,14 @@ class LensScraper: ObservableObject {
         task.resume()
     }
     
-    private func generateGeminiOverview(imageBase64: String, matches: [VisualMatch]) {
-        DispatchQueue.main.async {
-            self.statusText = "Generating AI Overview..."
-        }
-        
+    private func generateGeminiOverview(imageBase64: String, matches: [VisualMatch] = []) {
         guard !geminiApiKey.isEmpty else {
-            DispatchQueue.main.async {
-                self.overview = "Gemini API key is not set. Showing raw visual matches."
-                self.isScraping = false
-            }
             return
         }
         
-        var matchesText = ""
-        for (index, match) in matches.prefix(5).enumerated() {
-            matchesText += "\(index + 1). \(match.title ?? "Unknown") - \(match.source ?? "Unknown Source")\n"
-        }
+        let prompt = "Analyze this image and identify what is shown. Provide a concise, clear, and helpful overview (1-2 sentences) of what it is, its key features, and context."
         
-        let prompt = "Analyze the provided image along with these visual match results from Google Lens:\n\n\(matchesText)\n\nProvide a concise, helpful overview of what this is."
-        
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=\(geminiApiKey)")!
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=\(geminiApiKey)")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -792,202 +866,536 @@ class LensScraper: ObservableObject {
         request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody)
         
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let data = data, error == nil else {
-                DispatchQueue.main.async {
-                    self?.overview = "Failed to reach Gemini API."
-                    self?.isScraping = false
-                }
-                return
-            }
+            guard let data = data, error == nil else { return }
             
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    if let errorObj = json["error"] as? [String: Any], let msg = errorObj["message"] as? String {
-                        DispatchQueue.main.async {
-                            self?.overview = "Gemini API Error: \(msg)"
-                            self?.isScraping = false
-                        }
-                    } else if let candidates = json["candidates"] as? [[String: Any]],
+                    if let candidates = json["candidates"] as? [[String: Any]],
                        let firstCandidate = candidates.first,
                        let content = firstCandidate["content"] as? [String: Any],
                        let parts = content["parts"] as? [[String: Any]],
                        let firstPart = parts.first,
                        let text = firstPart["text"] as? String {
                         DispatchQueue.main.async {
-                            self?.overview = text
-                            self?.isScraping = false
-                        }
-                    } else {
-                        DispatchQueue.main.async {
-                            self?.overview = "Failed to parse Gemini response."
-                            self?.isScraping = false
+                            withAnimation(.easeOut(duration: 0.35)) {
+                                self?.overview = text
+                            }
+                            // If visual matches have already arrived, turn off the beam
+                            if self?.matches.isEmpty == false {
+                                self?.isScraping = false
+                            }
                         }
                     }
                 }
-            } catch {
-                DispatchQueue.main.async {
-                    self?.overview = "Error parsing Gemini response."
-                    self?.isScraping = false
-                }
-            }
+            } catch { }
         }
         task.resume()
     }
     
     private func loadMockData() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.matches = [
-                VisualMatch(title: "Apple MacBook Pro M3 Max - 16-inch", source: "Apple", link: "https://apple.com/macbook-pro", thumbnail: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/mbp16-spaceblack-select-202310?wid=904&hei=840&fmt=jpeg&qlt=90&.v=1698169226604"),
-                VisualMatch(title: "MacBook Pro 16\" Space Black Review", source: "The Verge", link: "https://theverge.com", thumbnail: "https://cdn.vox-cdn.com/thumbor/n4J1YF5C8a17kQG4R4630lW_2K4=/0x0:2040x1360/2000x1333/filters:focal(1020x680:1021x681)/cdn.vox-cdn.com/uploads/chorus_asset/file/25061698/236773_Apple_MacBook_Pro_16_inch_M3_Max_AKrales_0023.jpg"),
-                VisualMatch(title: "M3 Max vs M2 Max: Which MacBook Pro is Right for You?", source: "MacRumors", link: "https://macrumors.com", thumbnail: "https://images.macrumors.com/t/2c89Fv2p0kHw-vO0l8U0L8X0Z0=/1600x/article-new/2023/10/MacBook-Pro-M3-Space-Black-Feature.jpg"),
-                VisualMatch(title: "Space Black MacBook Pro: Fingerprint Resistant?", source: "9to5Mac", link: "https://9to5mac.com", thumbnail: "https://i0.wp.com/9to5mac.com/wp-content/uploads/sites/6/2023/11/space-black-macbook-pro-1.jpg?w=1500&quality=82&strip=all&ssl=1")
-            ]
-            self.overview = "Based on the visual matches, this appears to be the new Apple MacBook Pro featuring the M3 Max chip in the Space Black color finish. The visual results suggest an interest in reviews, comparisons, and purchasing options for this high-performance laptop."
-            self.isScraping = false
+        // 1. AI overview arrives first (0.4s) while the beam is still actively running!
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            withAnimation(.easeOut(duration: 0.35)) {
+                self.overview = "Based on the visual matches, this appears to be the new Apple MacBook Pro featuring the M3 Max chip in the Space Black color finish."
+            }
         }
+        
+        // 2. Visual matches arrive from SerpApi later (1.3s), and the beam turns off
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
+            withAnimation(.easeOut(duration: 0.35)) {
+                self.matches = [
+                    VisualMatch(title: "Apple MacBook Pro M3 Max - 16-inch", source: "Apple", link: "https://apple.com/macbook-pro", thumbnail: "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/mbp16-spaceblack-select-202310?wid=904&hei=840&fmt=jpeg&qlt=90&.v=1698169226604"),
+                    VisualMatch(title: "MacBook Pro 16\" Space Black Review", source: "The Verge", link: "https://theverge.com", thumbnail: "https://cdn.vox-cdn.com/thumbor/n4J1YF5C8a17kQG4R4630lW_2K4=/0x0:2040x1360/2000x1333/filters:focal(1020x680:1021x681)/cdn.vox-cdn.com/uploads/chorus_asset/file/25061698/236773_Apple_MacBook_Pro_16_inch_M3_Max_AKrales_0023.jpg"),
+                    VisualMatch(title: "M3 Max vs M2 Max: Which MacBook Pro is Right for You?", source: "MacRumors", link: "https://macrumors.com", thumbnail: "https://images.macrumors.com/t/2c89Fv2p0kHw-vO0l8U0L8X0Z0=/1600x/article-new/2023/10/MacBook-Pro-M3-Space-Black-Feature.jpg"),
+                    VisualMatch(title: "Space Black MacBook Pro: Fingerprint Resistant?", source: "9to5Mac", link: "https://9to5mac.com", thumbnail: "https://i0.wp.com/9to5mac.com/wp-content/uploads/sites/6/2023/11/space-black-macbook-pro-1.jpg?w=1500&quality=82&strip=all&ssl=1")
+                ]
+                self.isScraping = false
+            }
+        }
+    }
+}
+
+// MARK: - Variable Blur (CAFilter implementation adapted from nikstar/VariableBlur)
+
+public enum VariableBlurDirection {
+    case blurredTopClearBottom
+    case blurredBottomClearTop
+}
+
+public struct VariableBlurView: NSViewRepresentable {
+    public var maxBlurRadius: CGFloat = 20
+    public var direction: VariableBlurDirection = .blurredTopClearBottom
+    public var startOffset: CGFloat = 0
+    
+    public init(maxBlurRadius: CGFloat = 20, direction: VariableBlurDirection = .blurredTopClearBottom, startOffset: CGFloat = 0) {
+        self.maxBlurRadius = maxBlurRadius
+        self.direction = direction
+        self.startOffset = startOffset
+    }
+    
+    public func makeNSView(context: Context) -> VariableBlurNSView {
+        VariableBlurNSView(maxBlurRadius: maxBlurRadius, direction: direction, startOffset: startOffset)
+    }
+    
+    public func updateNSView(_ nsView: VariableBlurNSView, context: Context) {
+        nsView.update(maxBlurRadius: maxBlurRadius, direction: direction, startOffset: startOffset)
+    }
+}
+
+open class VariableBlurNSView: NSView {
+    private var maxBlurRadius: CGFloat
+    private var direction: VariableBlurDirection
+    private var startOffset: CGFloat
+    
+    public init(maxBlurRadius: CGFloat = 20, direction: VariableBlurDirection = .blurredTopClearBottom, startOffset: CGFloat = 0) {
+        self.maxBlurRadius = maxBlurRadius
+        self.direction = direction
+        self.startOffset = startOffset
+        super.init(frame: .zero)
+        
+        self.wantsLayer = true
+        applyVariableBlur()
+    }
+    
+    required public init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    open override func makeBackingLayer() -> CALayer {
+        if let LayerCls = NSClassFromString("CABackdropLayer") as? CALayer.Type {
+            return LayerCls.init()
+        }
+        return super.makeBackingLayer()
+    }
+    
+    public func update(maxBlurRadius: CGFloat, direction: VariableBlurDirection, startOffset: CGFloat) {
+        if self.maxBlurRadius != maxBlurRadius || self.direction != direction || self.startOffset != startOffset {
+            self.maxBlurRadius = maxBlurRadius
+            self.direction = direction
+            self.startOffset = startOffset
+            applyVariableBlur()
+        }
+    }
+    
+    open override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window = window, let layer = self.layer {
+            layer.setValue(window.backingScaleFactor, forKey: "scale")
+            layer.contentsScale = window.backingScaleFactor
+        }
+    }
+    
+    open override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        if let window = window, let layer = self.layer {
+            layer.setValue(window.backingScaleFactor, forKey: "scale")
+            layer.contentsScale = window.backingScaleFactor
+        }
+    }
+    
+    private func applyVariableBlur() {
+        guard let layer = self.layer else { return }
+        
+        let clsName = String("retliFAC".reversed())
+        guard let Cls = NSClassFromString(clsName) as? NSObject.Type else {
+            return
+        }
+        let selName = String(":epyThtiWretlif".reversed())
+        guard let variableBlur = Cls.self.perform(NSSelectorFromString(selName), with: "variableBlur")?.takeUnretainedValue() as? NSObject else {
+            return
+        }
+        
+        let gradientImage = makeGradientImage(startOffset: startOffset, direction: direction)
+        
+        variableBlur.setValue(maxBlurRadius, forKey: "inputRadius")
+        variableBlur.setValue(gradientImage, forKey: "inputMaskImage")
+        variableBlur.setValue(true, forKey: "inputNormalizeEdges")
+        
+        layer.filters = [variableBlur]
+    }
+    
+    private func makeGradientImage(width: CGFloat = 100, height: CGFloat = 100, startOffset: CGFloat, direction: VariableBlurDirection) -> CGImage? {
+        let ciGradientFilter = CIFilter.smoothLinearGradient()
+        ciGradientFilter.color0 = CIColor.black
+        ciGradientFilter.color1 = CIColor.clear
+        ciGradientFilter.point0 = CGPoint(x: 0, y: height)
+        ciGradientFilter.point1 = CGPoint(x: 0, y: startOffset * height)
+        if case .blurredBottomClearTop = direction {
+            ciGradientFilter.point0.y = 0
+            ciGradientFilter.point1.y = height - ciGradientFilter.point1.y
+        }
+        guard let output = ciGradientFilter.outputImage else { return nil }
+        return CIContext().createCGImage(output, from: CGRect(x: 0, y: 0, width: width, height: height))
+    }
+    
+    open override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil // Non-blocking: let mouse interactions pass smoothly to underlying views
+    }
+}
+
+// MARK: - Border Beam Animation
+struct BorderBeamView: View {
+    var beamColor: Color = Color(red: 0.35, green: 0.65, blue: 1.0)
+    var duration: Double = 2.8
+    var lineWidth: CGFloat = 2.5
+    var cornerRadius: CGFloat = 20.0
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            let angle = (time / duration).truncatingRemainder(dividingBy: 1.0) * 360.0
+
+            let beamGradient = AngularGradient(
+                gradient: Gradient(stops: [
+                    .init(color: .clear, location: 0.0),
+                    .init(color: beamColor.opacity(0.0), location: 0.60),
+                    .init(color: beamColor.opacity(0.3), location: 0.72),
+                    .init(color: beamColor.opacity(0.85), location: 0.88),
+                    .init(color: Color.white, location: 0.96),
+                    .init(color: beamColor, location: 0.99),
+                    .init(color: .clear, location: 1.0)
+                ]),
+                center: .center,
+                startAngle: .degrees(angle),
+                endAngle: .degrees(angle + 360)
+            )
+
+            ZStack {
+                // Subtle perimeter track
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(beamColor.opacity(0.12), lineWidth: 1.0)
+
+                // Wide ambient diffuse glow
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(beamGradient, lineWidth: lineWidth + 6)
+                    .blur(radius: 8)
+                    .opacity(0.9)
+
+                // Mid focused glow
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(beamGradient, lineWidth: lineWidth + 2)
+                    .blur(radius: 3)
+                    .opacity(0.75)
+
+                // Sharp luminous electric core
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(beamGradient, lineWidth: lineWidth)
+                    .shadow(color: beamColor.opacity(0.9), radius: 6)
+            }
+        }
+        .allowsHitTesting(false)
+        .ignoresSafeArea()
     }
 }
 
 // MARK: - UI
 struct ContentView: View {
     @StateObject var scraper: LensScraper
+    @State private var searchText = ""
+    @FocusState private var isSearchFocused: Bool
+    @State private var animatedCardIds: Set<UUID> = []
+    @State private var clickMonitor: Any? = nil
     
+    @State private var searchTask: Task<Void, Never>? = nil
+    @State private var isImageEnlarged = false
+    @Namespace private var imageAnimation
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Header bar
-            HStack {
-                Text("Nexus (SerpApi)").font(.custom("Geist", size: 16).weight(.semibold))
-                Spacer()
-                Button(action: {
-                    scraper.startCapture()
-                }) {
-                    Image(systemName: "camera.viewfinder")
-                    Text("Take Snapshot")
-                }
-                .disabled(scraper.isScraping)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(8)
-                .buttonStyle(PlainButtonStyle())
-                .onHover { hovering in
-                    if hovering { NSCursor.pointingHand.push() }
-                    else { NSCursor.pop() }
-                }
+        ZStack(alignment: .top) {
+            // Full background glass effect with brand blue gradient
+            ZStack {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.65),
+                        Color(red: 0.02, green: 0.06, blue: 0.18).opacity(0.5)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
             }
-            .padding()
-            .background(Color(NSColor.controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1.0)
+            )
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isSearchFocused = false
+                NSApp.keyWindow?.makeFirstResponder(nil)
+            }
             
-            Divider()
-            
-            if scraper.isScraping {
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                    Text(scraper.statusText)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if scraper.matches.isEmpty {
-                VStack {
-                    Image(systemName: "photo.on.rectangle.angled")
-                        .font(.custom("Geist", size: 60))
-                        .foregroundColor(.secondary)
-                        .padding()
-                    Text("Ready.")
-                        .font(.custom("Geist", size: 16).weight(.semibold))
-                    Text("Click 'Take Snapshot' to search using SerpApi.")
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Results UI
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("AI Overview")
-                        .font(.custom("Geist", size: 16).weight(.semibold))
-                        .padding(.top)
-                    
-                    Text(scraper.overview)
-                        .font(.custom("Geist", size: 14).weight(.regular))
-                        .foregroundColor(.secondary)
-                    
-                    Text("Visual Matches")
-                        .font(.custom("Geist", size: 16).weight(.semibold))
-                        .padding(.top)
-                    
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 16)], spacing: 16) {
-                            ForEach(scraper.matches) { match in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    // Thumbnail
-                                    if let urlString = match.thumbnail, let url = URL(string: urlString) {
-                                        AsyncImage(url: url) { phase in
-                                            if let image = phase.image {
-                                                image
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(height: 140)
-                                                    .clipped()
-                                            } else if phase.error != nil {
-                                                Rectangle()
-                                                    .fill(Color(NSColor.windowBackgroundColor))
-                                                    .frame(height: 140)
-                                                    .overlay(Image(systemName: "photo").foregroundColor(.secondary))
-                                            } else {
-                                                Rectangle()
-                                                    .fill(Color(NSColor.windowBackgroundColor))
-                                                    .frame(height: 140)
-                                                    .overlay(ProgressView())
-                                            }
-                                        }
-                                        .cornerRadius(8)
-                                    } else {
-                                        Rectangle()
-                                            .fill(Color(NSColor.windowBackgroundColor))
-                                            .frame(height: 140)
-                                            .overlay(Image(systemName: "photo").foregroundColor(.secondary))
-                                            .cornerRadius(8)
-                                    }
-                                    
-                                    // Text
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(match.source ?? "Unknown Source")
-                                            .font(.custom("Geist", size: 12).weight(.regular))
-                                            .fontWeight(.semibold)
+            // Results Scroll Area
+            GeometryReader { geo in
+                ScrollView(showsIndicators: false) {
+                    Group {
+                        if scraper.matches.isEmpty && scraper.overview.isEmpty {
+                            if scraper.isScraping {
+                                // Clean canvas under sticky search bar while the whole-window beam glow is active
+                                VStack {
+                                    Color.clear.frame(height: scraper.capturedImage != nil ? 116 : 0)
+                                    Spacer()
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 400)
+                            } else {
+                                VStack(spacing: 16) {
+                                    if scraper.statusText.contains("Error") || scraper.statusText.contains("Failed") {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .font(.custom("Geist", size: 50))
+                                            .foregroundColor(.red)
+                                            .padding(.top, 40)
+                                        Text("Search Failed")
+                                            .font(.custom("Geist", size: 18).weight(.semibold))
+                                            .foregroundColor(.red)
+                                        Text(scraper.statusText)
+                                            .font(.custom("Geist", size: 13))
                                             .foregroundColor(.secondary)
-                                        
-                                        Text(match.title ?? "No title")
-                                            .font(.custom("Geist", size: 12).weight(.regular))
-                                            .lineLimit(2)
-                                            .multilineTextAlignment(.leading)
-                                    }
-                                    .padding(.horizontal, 4)
-                                    .padding(.bottom, 8)
-                                }
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(8)
-                                .shadow(color: Color.black.opacity(0.1), radius: 3, x: 0, y: 1)
-                                .onTapGesture {
-                                    if let link = match.link, let url = URL(string: link) {
-                                        NSWorkspace.shared.open(url)
+                                            .multilineTextAlignment(.center)
+                                            .padding(.horizontal, 20)
+                                    } else {
+                                        Image(systemName: "photo.on.rectangle.angled")
+                                            .font(.custom("Geist", size: 60))
+                                            .foregroundColor(.secondary)
+                                            .padding(.top, 40)
+                                        Text("Ready.")
+                                            .font(.custom("Geist", size: 16).weight(.semibold))
+                                        Text("Click 'Take Snapshot' to search using SerpApi.")
+                                            .foregroundColor(.secondary)
                                     }
                                 }
-                                .onHover { hovering in
-                                    if hovering { NSCursor.pointingHand.push() }
-                                    else { NSCursor.pop() }
+                                .frame(maxWidth: .infinity, minHeight: 400, alignment: .center)
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 14) {
+                                // Balanced spacer below sticky search bar (reduced spacing)
+                                Color.clear.frame(height: scraper.capturedImage != nil ? 116 : 0)
+                                
+                                if !scraper.overview.isEmpty {
+                                    Text(scraper.overview)
+                                        .font(.custom("Averia Serif Libre", size: 20))
+                                        .foregroundColor(.primary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.top, scraper.capturedImage == nil ? 4 : 0)
+                                        .padding(.bottom, 2)
+                                        .transition(.opacity.combined(with: .move(edge: .top)).animation(.easeOut(duration: 0.35)))
+                                }
+                            
+                                // Masonry Grid with Fixed Column Widths
+                                if !scraper.matches.isEmpty {
+                                    let availableWidth = max(280, min(geo.size.width - 48, 750))
+                                    let numCols = availableWidth > 580 ? 3 : 2
+                                    let spacing: CGFloat = 16
+                                    let colWidth = floor((availableWidth - spacing * CGFloat(numCols - 1)) / CGFloat(numCols))
+                                    
+                                    HStack(alignment: .top, spacing: spacing) {
+                                        ForEach(0..<numCols, id: \.self) { colIndex in
+                                            VStack(spacing: spacing) {
+                                                ForEach(Array(scraper.matches.enumerated()).filter { $0.offset % numCols == colIndex }, id: \.element.id) { pair in
+                                                    VisualMatchCard(match: pair.element, index: pair.offset, cardWidth: colWidth, animatedCardIds: $animatedCardIds)
+                                                }
+                                            }
+                                            .frame(width: colWidth)
+                                        }
+                                    }
+                                    .frame(width: availableWidth)
+                                    .padding(.vertical, 4)
+                                    .padding(.bottom, 60)
+                                    .transition(.opacity.animation(.easeOut(duration: 0.35)))
                                 }
                             }
+                            .frame(width: max(280, min(geo.size.width - 48, 750)), alignment: .leading)
+                            .opacity(scraper.isScraping && !scraper.matches.isEmpty ? 0.65 : 1.0)
+                            .animation(.easeInOut(duration: 0.25), value: scraper.isScraping)
                         }
-                        .padding(.vertical, 8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, 24)
+                }
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        isSearchFocused = false
+                        NSApp.keyWindow?.makeFirstResponder(nil)
+                    }
+                )
+            }
+            
+            // Bottom Progressive Blur (VariableBlur CAFilter + subtle liquid gradient)
+            VStack {
+                Spacer()
+                VariableBlurView(maxBlurRadius: 20, direction: .blurredBottomClearTop, startOffset: 0)
+                    .frame(height: 38)
+                    .overlay(
+                        LinearGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: Color(red: 0.02, green: 0.05, blue: 0.16).opacity(0.85), location: 0.0),
+                                .init(color: Color(red: 0.02, green: 0.05, blue: 0.16).opacity(0.35), location: 0.6),
+                                .init(color: Color(red: 0.02, green: 0.05, blue: 0.16).opacity(0.0), location: 1.0)
+                            ]),
+                            startPoint: .bottom,
+                            endPoint: .top
+                        )
+                    )
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .zIndex(8)
+            
+            // Top Progressive Blur behind Sticky Search Bar (VariableBlur CAFilter + subtle liquid gradient)
+            if scraper.capturedImage != nil {
+                VariableBlurView(maxBlurRadius: 28, direction: .blurredTopClearBottom, startOffset: 0)
+                    .frame(height: 145)
+                    .overlay(
+                        LinearGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: Color(red: 0.03, green: 0.07, blue: 0.22).opacity(0.85), location: 0.0),
+                                .init(color: Color(red: 0.03, green: 0.07, blue: 0.22).opacity(0.45), location: 0.55),
+                                .init(color: Color(red: 0.03, green: 0.07, blue: 0.22).opacity(0.0), location: 1.0)
+                            ]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .ignoresSafeArea(edges: .top)
+                    .allowsHitTesting(false)
+                    .zIndex(9)
+            }
+            
+            // Sticky Search Bar Overlay with Liquid Glass Capsule & Brand Blue Active Highlight
+            if let img = scraper.capturedImage {
+                VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                        SearchCapturedImage(img: img, onEnlarge: {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { isImageEnlarged = true }
+                        })
+                        
+                        TextField("add to search", text: $searchText)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(.system(size: 15))
+                            .focused($isSearchFocused)
+                            .onChange(of: searchText) { newValue in
+                                searchTask?.cancel()
+                                searchTask = Task {
+                                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                                    guard !Task.isCancelled else { return }
+                                    
+                                    if searchText == newValue && !newValue.isEmpty {
+                                        DispatchQueue.main.async {
+                                            scraper.isScraping = true
+                                            scraper.statusText = "Searching Google Lens with text..."
+                                        }
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                            scraper.isScraping = false
+                                        }
+                                    }
+                                }
+                            }
+                    }
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(Color.white.opacity(0.08))
+                    )
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .stroke(
+                                isSearchFocused ? Color(red: 0.25, green: 0.55, blue: 1.0) : Color.white.opacity(0.22),
+                                lineWidth: isSearchFocused ? 2.0 : 1.0
+                            )
+                            .shadow(color: isSearchFocused ? Color(red: 0.25, green: 0.55, blue: 1.0).opacity(0.45) : Color.clear, radius: 6)
+                    )
+                    .frame(maxWidth: 750)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 48)
+                    .padding(.bottom, 16)
+                }
+                .frame(maxWidth: .infinity)
+                .zIndex(10)
+            }
+            
+            // Enlarged Image Modal
+            if isImageEnlarged, let img = scraper.capturedImage {
+                ZStack {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .overlay(Color.black.opacity(0.8))
+                        .ignoresSafeArea()
+                        .onTapGesture { withAnimation { isImageEnlarged = false } }
+                    
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .scaleEffect(1.04)
+                        .clipped()
+                        .padding(40)
+                    
+                    VStack {
+                        HStack {
+                            Spacer()
+                            EnlargedImageCloseButton {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    isImageEnlarged = false
+                                }
+                            }
+                            .padding(20)
+                        }
+                        Spacer()
                     }
                 }
-                .padding(.horizontal)
+                .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+                .zIndex(100)
+            }
+            
+            // Whole Window Border Beam Glow during image search
+            if scraper.isScraping {
+                BorderBeamView(
+                    beamColor: Color(red: 0.35, green: 0.65, blue: 1.0),
+                    duration: 2.8,
+                    lineWidth: 2.5,
+                    cornerRadius: 20
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.opacity.animation(.easeInOut(duration: 0.35)))
+                .zIndex(50)
             }
         }
-        .frame(minWidth: 700, minHeight: 600)
+        .onAppear {
+            isSearchFocused = false
+            if clickMonitor == nil {
+                clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { event in
+                    if isSearchFocused, let win = event.window {
+                        let hitView = win.contentView?.hitTest(event.locationInWindow)
+                        let isInsideTextField = (hitView is NSTextField) || (hitView is NSTextView)
+                        if !isInsideTextField {
+                            DispatchQueue.main.async {
+                                isSearchFocused = false
+                                win.makeFirstResponder(nil)
+                            }
+                        }
+                    }
+                    return event
+                }
+            }
+        }
+        .onDisappear {
+            if let monitor = clickMonitor {
+                NSEvent.removeMonitor(monitor)
+                clickMonitor = nil
+            }
+        }
+        .onChange(of: scraper.matches.count) {
+            if scraper.matches.isEmpty {
+                animatedCardIds.removeAll()
+            }
+        }
+        .ignoresSafeArea(.all, edges: .top)
+        .frame(minWidth: 420, maxWidth: .infinity, minHeight: 500, maxHeight: .infinity)
     }
 }
+
 import Cocoa
 import ApplicationServices
 import Vision
@@ -1540,12 +1948,12 @@ class TextEditManager: ObservableObject {
     
     func callGemini(text: String, action: String, customPrompt: String?) async throws -> String {
         let delegate = NSApplication.shared.delegate as? AppDelegate
-        let geminiApiKey: String = delegate?.scraper.geminiApiKey ?? ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
+        let geminiApiKey: String = delegate?.scraper.geminiApiKey ?? AppSecrets.geminiApiKey
         if geminiApiKey.isEmpty {
-            return "ERROR: GEMINI_API_KEY environment variable is missing."
+            return "ERROR: GEMINI_API_KEY is missing."
         }
         
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=\(geminiApiKey)")!
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=\(geminiApiKey)")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -1621,6 +2029,7 @@ struct TextEditGlassButton: View {
                     } else {
                         if systemIcon.hasPrefix("phosphor_") {
                             Image(systemIcon)
+                                .renderingMode(.template)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
                                 .frame(width: 18, height: 18)
@@ -1812,7 +2221,7 @@ struct TextEditOverlayView: View {
                                 .matchedGeometryEffect(id: "edit_m", in: glassSpace)
                                 .offset(x: buttonsExpanded ? -22 : 0)
                             } else {
-                                TextEditGlassButton(systemIcon: "pencil", action: {
+                                TextEditGlassButton(systemIcon: "phosphor_chat", action: {
                                     withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                                         isEditExpanded.toggle()
                                     }
@@ -1840,6 +2249,15 @@ struct TextEditOverlayView: View {
                     }
                     
                     if manager.isProcessing {
+                        BorderBeamView(
+                            beamColor: Color(red: 0.35, green: 0.65, blue: 1.0),
+                            duration: 2.2,
+                            lineWidth: 2.0,
+                            cornerRadius: 14
+                        )
+                        .frame(width: isEditExpanded ? 248 : 320, height: 44)
+                        .offset(x: isEditExpanded ? (buttonsExpanded ? -22 : 0) : 0)
+                        
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             .padding(.top, 80)
@@ -1904,6 +2322,184 @@ struct TextEditOverlayView: View {
                 if window is CaptureWindow && window.frame.size.width == 500 {
                     closeWithAnimation()
                 }
+            }
+        }
+    }
+}
+
+
+
+
+struct VisualMatchCard: View {
+    var match: VisualMatch
+    var index: Int
+    var cardWidth: CGFloat
+    @Binding var animatedCardIds: Set<UUID>
+    @State private var appearBlur: Bool
+    
+    init(match: VisualMatch, index: Int, cardWidth: CGFloat, animatedCardIds: Binding<Set<UUID>>) {
+        self.match = match
+        self.index = index
+        self.cardWidth = cardWidth
+        self._animatedCardIds = animatedCardIds
+        let alreadyAnimated = animatedCardIds.wrappedValue.contains(match.id)
+        self._appearBlur = State(initialValue: !alreadyAnimated)
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Thumbnail with fixed width & natural aspect ratio height
+            if let urlString = match.thumbnail, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: cardWidth)
+                            .cornerRadius(14)
+                    } else if phase.error != nil {
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.white.opacity(0.06))
+                            .frame(width: cardWidth, height: cardWidth * 0.75)
+                            .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+                    } else {
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.white.opacity(0.04))
+                            .frame(width: cardWidth, height: cardWidth * 0.75)
+                            .overlay(ProgressView().scaleEffect(0.8))
+                    }
+                }
+                .frame(width: cardWidth)
+            } else {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.white.opacity(0.06))
+                    .frame(width: cardWidth, height: cardWidth * 0.75)
+                    .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+            }
+            
+            // Text
+            VStack(alignment: .leading, spacing: 4) {
+                Text(match.source ?? "Unknown Source")
+                    .font(.custom("Geist", size: 11).weight(.regular))
+                    .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                
+                Text(match.title ?? "No title")
+                    .font(.custom("Geist", size: 12).weight(.regular))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+            }
+            .frame(width: cardWidth, alignment: .leading)
+        }
+        .frame(width: cardWidth, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let link = match.link, let url = URL(string: link) {
+                NSWorkspace.shared.open(url)
+            }
+        }
+        .onHover { hovering in
+            if hovering { NSCursor.pointingHand.push() }
+            else { NSCursor.pop() }
+        }
+        .blur(radius: appearBlur ? 8 : 0)
+        .opacity(appearBlur ? 0 : 1)
+        .onAppear {
+            if !animatedCardIds.contains(match.id) {
+                animatedCardIds.insert(match.id)
+                withAnimation(.easeOut(duration: 0.35).delay(Double(min(index, 12)) * 0.04)) {
+                    appearBlur = false
+                }
+            }
+        }
+    }
+}
+
+struct SearchCapturedImage: View {
+    var img: NSImage
+    var onEnlarge: () -> Void
+    @State private var isHovering = false
+    @State private var appearBlur = true
+    
+    var body: some View {
+        Image(nsImage: img)
+            .resizable()
+            .scaledToFit()
+            .scaleEffect(1.04) // Pushes the 1px black screencapture artifact out of bounds
+            .frame(height: 48)
+            .clipped()
+            .cornerRadius(16)
+            .overlay(
+                ZStack {
+                    if isHovering {
+                        Color.black.opacity(0.4)
+                        Image("phosphor_corners_out")
+                            .renderingMode(.template)
+                            .resizable()
+                            .frame(width: 20, height: 20)
+                            .foregroundColor(.white)
+                    }
+                }
+            )
+            .cornerRadius(16)
+            .onHover { h in isHovering = h }
+            .onTapGesture { onEnlarge() }
+            .blur(radius: appearBlur ? 10 : 0)
+            .opacity(appearBlur ? 0 : 1)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.4)) { appearBlur = false }
+            }
+    }
+}
+
+struct IconPressButtonStyle: ButtonStyle {
+    var isHovering: Bool
+    
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : (isHovering ? 1.08 : 1.0))
+            .animation(.spring(response: 0.22, dampingFraction: 0.65), value: configuration.isPressed)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isHovering)
+    }
+}
+
+struct EnlargedImageCloseButton: View {
+    var action: () -> Void
+    @State private var isHovering = false
+    
+    var body: some View {
+        Button(action: action) {
+            Image("phosphor_x")
+                .renderingMode(.template)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 22, height: 22)
+                .foregroundColor(isHovering ? Color.red : Color.white)
+                .shadow(color: isHovering ? Color.red.opacity(0.8) : Color.black.opacity(0.4), radius: isHovering ? 8 : 3)
+                .padding(10)
+                .background(
+                    Circle()
+                        .fill(isHovering ? Color.red.opacity(0.18) : Color.clear)
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(IconPressButtonStyle(isHovering: isHovering))
+        .glassEffect(isHovering ? .regular.tint(Color.red.opacity(0.55)) : .clear, in: Circle())
+        .onHover { hovering in
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+                isHovering = hovering
+            }
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .onDisappear {
+            if isHovering {
+                NSCursor.pop()
+                isHovering = false
             }
         }
     }

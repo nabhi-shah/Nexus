@@ -24,6 +24,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         requestPermissions()
         
+        // Register Custom Fonts Dynamically
+        if let regularFontURL = Bundle.main.url(forResource: "AveriaSerifLibre-Regular", withExtension: "ttf") {
+            CTFontManagerRegisterFontsForURL(regularFontURL as CFURL, .process, nil)
+        }
+        if let boldFontURL = Bundle.main.url(forResource: "AveriaSerifLibre-Bold", withExtension: "ttf") {
+            CTFontManagerRegisterFontsForURL(boldFontURL as CFURL, .process, nil)
+        }
+        
         scraper = LensScraper()
         let contentView = ContentView(scraper: self.scraper)
         
@@ -52,12 +60,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Setup main window but do NOT show it immediately
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 700),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
         window.center()
-        window.title = "Nexus"
+        window.minSize = NSSize(width: 420, height: 500)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
+        window.isMovableByWindowBackground = true
+        window.hasShadow = true
+        window.backgroundColor = .clear
         window.contentView = NSHostingView(rootView: contentView)
         
         scraper.mainWindow = window
@@ -106,45 +120,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let delegate = NSApplication.shared.delegate as? AppDelegate {
                 DispatchQueue.main.async {
                     if hotKeyID.id == 1 {
-                        delegate.scraper.startCapture()
+                        if !delegate.scraper.isScraping {
+                            delegate.scraper.startCapture()
+                        }
                     } else if hotKeyID.id == 2 {
                         let manager = TextEditManager.shared
+                        if manager.isProcessing || delegate.textEditWindow?.isVisible == true {
+                            return // Prevent double trigger
+                        }
                         manager.currentElement = manager.getFocusedElement()
                         // Extract text BEFORE opening our window
                         manager.extractedText = manager.extractText(from: manager.currentElement)
                         let screenHeight = NSScreen.main?.frame.height ?? 800
                         let mousePos = NSEvent.mouseLocation
                         
-                        let element = manager.currentElement
-                        
-                        // 1. Try Cursor Bounds (only if we have an element)
-                        if let element = element, let cursorPos = manager.getCursorPosition(element: element) {
-                            manager.menuPosition = CGPoint(x: cursorPos.x, y: screenHeight - cursorPos.y)
-                            delegate.showTextEditOverlay()
-                        // 2. Try Highlight Pixels (perfect for large text selections, handles nil element by scanning full screen)
-                        } else if manager.wasTextSelected, let highlightPos = manager.findHighlightPosition(element: element, screenHeight: screenHeight) {
-                            manager.menuPosition = highlightPos
-                            delegate.showTextEditOverlay()
-                        // 3. Fallback to OCR (if APIs and pixels fail, handles nil element by scanning full screen)
-                        } else if let text = manager.extractedText, !text.isEmpty {
-                            Task {
-                                let apiKey = "apikey_22513b59699a87844a2f96237441919e2e32_14fcdb742ae45567eef64cd0248e8c2e59a2a53537709c5099a04e3012ab5981"
-                                if let newPos = await manager.identifyMenuPositionWithJev(apiKey: apiKey, fullText: text, element: element, screenHeight: screenHeight) {
-                                    DispatchQueue.main.async {
-                                        manager.menuPosition = CGPoint(x: newPos.x, y: screenHeight - newPos.y)
-                                        delegate.showTextEditOverlay()
-                                    }
-                                } else {
-                                    DispatchQueue.main.async {
-                                        manager.menuPosition = mousePos
-                                        delegate.showTextEditOverlay()
-                                    }
-                                }
-                            }
-                        } else {
-                            manager.menuPosition = mousePos
-                            delegate.showTextEditOverlay()
-                        }
+                        manager.menuPosition = mousePos
+                        delegate.showTextEditOverlay()
                     }
                 }
             }
@@ -164,6 +155,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
 
     var textEditWindow: NSWindow?
+    var highlightWindow: NSWindow?
     
     func handleHotkey() {
         let manager = TextEditManager.shared
@@ -189,6 +181,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         let view = TextEditOverlayView { [weak self] in
             self?.textEditWindow?.orderOut(nil)
+            self?.highlightWindow?.orderOut(nil)
             NSApp.hide(nil)
         }
         textEditWindow?.contentView = NSHostingView(rootView: view.id(UUID()))

@@ -3,3 +3,16 @@ ModuleCache/
 *.app/
 DerivedData/
 xcuserdata/
+build/
+.build/
+Nexus/build/
+*.profraw
+*.py
+*.rb
+test_*
+test.*
+dummy.png
+main
+Nexus/test.png
+Nexus/Nexus/model.gguf
+indow.titlebarSeparatorStyle = .none
