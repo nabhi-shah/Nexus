@@ -2778,12 +2778,10 @@ struct TextEditOverlayView: View {
                                 .glassEffectID("chat_morph", in: glassSpace)
                             } else {
                                 ZStack(alignment: .bottomTrailing) {
-                                    TextField("Edit instruction...", text: $customPrompt, axis: .vertical)
-                                        .lineLimit(1...5)
+                                    TextField("Edit instruction...", text: $customPrompt)
                                         .textFieldStyle(PlainTextFieldStyle())
                                         .font(.custom("Geist", size: 14))
                                         .foregroundColor(.white)
-                                        .fixedSize(horizontal: false, vertical: true)
                                         .padding(.leading, 14)
                                         .padding(.trailing, 38)
                                         .padding(.vertical, 13)
@@ -2812,8 +2810,7 @@ struct TextEditOverlayView: View {
                                     .padding(.trailing, 10)
                                     .padding(.bottom, 10)
                                 }
-                                .frame(width: 248)
-                                .frame(minHeight: 44, maxHeight: 115)
+                                .frame(width: 248, height: 44)
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 .background(
                                     RoundedRectangle(cornerRadius: 14, style: .continuous)
