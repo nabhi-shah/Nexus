@@ -525,8 +525,6 @@ class LensScraper: ObservableObject {
             if !isScraping {
                 DispatchQueue.main.async {
                     self.closeCaptureWindow()
-                    self.mainWindow?.makeKeyAndOrderFront(nil)
-                    NSApp.activate(ignoringOtherApps: true)
                 }
             }
         }
@@ -587,6 +585,7 @@ class LensScraper: ObservableObject {
                 manager.isFinished = true
                 self?.statusText = "Capture cancelled."
                 self?.isScraping = false
+                self?.mainWindow?.orderOut(nil)
             }
         })
         
@@ -2473,6 +2472,29 @@ struct TextEditGlassButton: View {
     
     @State private var isHovering = false
 
+    private var fillColor: Color {
+        if isBlackDot { return .black }
+        if isCloseButton && isHovering { return Color.red.opacity(0.4) }
+        return isHovering ? Color.black.opacity(0.65) : Color.black.opacity(0.4)
+    }
+    
+    private var strokeColor: Color {
+        if isBlackDot { return .clear }
+        if isCloseButton && isHovering { return Color.red.opacity(0.6) }
+        return Color.white.opacity(0.3)
+    }
+    
+    private var iconColor: Color {
+        if isCloseButton && isHovering { return .red }
+        return .white
+    }
+    
+    private var shadowColor: Color {
+        if isBlackDot { return .clear }
+        if isCloseButton && isHovering { return Color.red.opacity(0.4) }
+        return Color.black.opacity(0.2)
+    }
+
     var body: some View {
         Button(action: action) {
             ZStack {
@@ -2488,8 +2510,9 @@ struct TextEditGlassButton: View {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(width: 18, height: 18)
-                            .foregroundColor(isCloseButton ? .red : .white)
-                            .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+                            .foregroundColor(iconColor)
+                            .shadow(color: isCloseButton && isHovering ? Color.red.opacity(0.8) : Color.clear, radius: 4)
+                            .transition(.opacity.animation(.easeInOut(duration: 0.2)))
                     }
                 }
             }
@@ -2498,18 +2521,29 @@ struct TextEditGlassButton: View {
         .buttonStyle(PlainButtonStyle())
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isBlackDot ? Color.black : (isCloseButton ? Color.red.opacity(isHovering ? 0.8 : 0.4) : Color.black.opacity(isHovering ? 0.6 : 0.4)))
+                .fill(fillColor)
         )
-        .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(isBlackDot ? Color.clear : Color.white.opacity(0.3), lineWidth: 1))
-        .shadow(color: isBlackDot ? .clear : .black.opacity(0.2), radius: 5)
+        .glassEffect(isCloseButton && isHovering ? .regular.tint(Color.red.opacity(0.35)) : .clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(strokeColor, lineWidth: 1)
+        )
+        .shadow(color: shadowColor, radius: 5)
         .focusable(false)
         .onHover { hovering in
-            isHovering = hovering
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                isHovering = hovering
+            }
             if hovering {
                 NSCursor.pointingHand.push()
             } else {
                 NSCursor.pop()
+            }
+        }
+        .onDisappear {
+            if isHovering {
+                NSCursor.pop()
+                isHovering = false
             }
         }
     }
@@ -2522,7 +2556,7 @@ struct TextEditGooeyBackground: View {
     
     var body: some View {
         Canvas { context, size in
-            context.addFilter(.alphaThreshold(min: 0.5, color: .black))
+            context.addFilter(.alphaThreshold(min: 0.5, color: Color.black.opacity(0.55)))
             context.addFilter(.blur(radius: 12))
             
             context.drawLayer { ctx in
@@ -2533,20 +2567,36 @@ struct TextEditGooeyBackground: View {
                 }
             }
         } symbols: {
-            // Anchor
+            // Anchor / Initial Dot
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .frame(width: 44, height: 44)
                 .tag(0)
             
-            if isEditExpanded {
-                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 248, height: 44).offset(x: expanded ? -22 : 0).tag(1)
-                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 136 : 0).tag(4)
-            } else {
-                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 90, height: 44).offset(x: expanded ? -101 : 0).tag(1)
-                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 90, height: 44).offset(x: expanded ? 1 : 0).tag(2)
-                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 80 : 0).tag(3)
-                RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 136 : 0).tag(4)
-            }
+            // Symbol 1: Rephrase
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .frame(width: isEditExpanded ? 44 : 90, height: 44)
+                .offset(x: expanded ? (isEditExpanded ? -22 : -101) : 0)
+                .opacity(isEditExpanded ? 0 : 1)
+                .tag(1)
+            
+            // Symbol 2: Formalize
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .frame(width: isEditExpanded ? 44 : 90, height: 44)
+                .offset(x: expanded ? (isEditExpanded ? -22 : 1) : 0)
+                .opacity(isEditExpanded ? 0 : 1)
+                .tag(2)
+            
+            // Symbol 3: Chat morphs to Input Box
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .frame(width: isEditExpanded ? 248 : 44, height: 44)
+                .offset(x: expanded ? (isEditExpanded ? -22 : 80) : 0)
+                .tag(3)
+            
+            // Symbol 4: Close / Back
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .frame(width: 44, height: 44)
+                .offset(x: expanded ? 136 : 0)
+                .tag(4)
         }
     }
 }
@@ -2565,9 +2615,23 @@ struct TextEditOverlayView: View {
     
     @State private var isEditExpanded = false
     @State private var customPrompt = ""
+    @State private var isChatHovering = false
     @ObservedObject var manager = TextEditManager.shared
     
     @State private var monitorHolder = EventMonitorHolder()
+    
+    private func submitCustomPrompt() {
+        let prompt = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+        manager.processText(action: "custom", customPrompt: prompt) { success, newText in
+            if success, let newText = newText { 
+                closeWithAnimation()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    manager.replaceText(newText: newText)
+                }
+            }
+        }
+    }
     
     private func closeWithAnimation() {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
@@ -2593,115 +2657,161 @@ struct TextEditOverlayView: View {
                 ZStack(alignment: .center) {
                     TextEditGooeyBackground(expanded: buttonsExpanded, isEditExpanded: isEditExpanded)
                         .frame(width: 500, height: 200)
-                        .opacity(buttonsExpanded ? 0 : 1)
+                        .allowsHitTesting(false)
                     
                     GlassEffectContainer(spacing: 12) {
                         ZStack(alignment: .center) {
-                            if !isEditExpanded {
-                                TextEditGlassButton(systemIcon: "phosphor_translate", title: "Rephrase", action: {
+                            TextEditGlassButton(
+                                systemIcon: "phosphor_translate",
+                                title: "Rephrase",
+                                action: {
                                     manager.processText(action: "rephrase") { success, newText in
                                         if success, let newText = newText { 
                                             closeWithAnimation()
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                         }
                                     }
-                                }, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? -101 : 0)
-                                .glassEffectID("rephrase", in: glassSpace)
-                                
-                                TextEditGlassButton(systemIcon: "phosphor_briefcase", title: "Formalize", action: {
+                                },
+                                isBlackDot: !buttonsExpanded
+                            )
+                            .offset(x: buttonsExpanded ? (isEditExpanded ? -22 : -101) : 0)
+                            .opacity(isEditExpanded ? 0 : 1)
+                            .allowsHitTesting(!isEditExpanded)
+                            .glassEffectID("rephrase", in: glassSpace)
+                            
+                            TextEditGlassButton(
+                                systemIcon: "phosphor_briefcase",
+                                title: "Formalize",
+                                action: {
                                     manager.processText(action: "formalize") { success, newText in
                                         if success, let newText = newText { 
                                             closeWithAnimation()
                                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
                                         }
                                     }
-                                }, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? 1 : 0)
-                                .glassEffectID("formalize", in: glassSpace)
-                            }
+                                },
+                                isBlackDot: !buttonsExpanded
+                            )
+                            .offset(x: buttonsExpanded ? (isEditExpanded ? -22 : 1) : 0)
+                            .opacity(isEditExpanded ? 0 : 1)
+                            .allowsHitTesting(!isEditExpanded)
+                            .glassEffectID("formalize", in: glassSpace)
                             
-                            if isEditExpanded {
-                                ZStack {
-                                    if !buttonsExpanded {
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.black).frame(width: 44, height: 44)
-                                    } else {
-                                        HStack {
-                                            TextField("Edit instruction...", text: $customPrompt, axis: .vertical)
-                                                .lineLimit(1...6)
-                                                .textFieldStyle(PlainTextFieldStyle())
-                                                .font(.custom("Geist", size: 14))
+                            // Chat button morphing to expanded input box
+                            if !isEditExpanded {
+                                Button(action: {
+                                    withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
+                                        isEditExpanded = true
+                                    }
+                                }) {
+                                    ZStack {
+                                        if buttonsExpanded {
+                                            Image("phosphor_chat")
+                                                .renderingMode(.template)
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fit)
+                                                .frame(width: 18, height: 18)
                                                 .foregroundColor(.white)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 8)
-                                                .mask(LinearGradient(gradient: Gradient(stops: [.init(color: .clear, location: 0.0), .init(color: .black, location: 0.15), .init(color: .black, location: 0.85), .init(color: .clear, location: 1.0)]), startPoint: .top, endPoint: .bottom))
-                                                .onSubmit {
-                                                    manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
-                                                        if success, let newText = newText { 
-                                                            closeWithAnimation()
-                                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
-                                                        }
-                                                    }
-                                                }
-                                            
-                                            Button(action: {
-                                                manager.processText(action: "custom", customPrompt: customPrompt) { success, newText in
-                                                    if success, let newText = newText { 
-                                                            closeWithAnimation()
-                                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
-                                                    }
-                                                }
-                                            }) {
-                                                ZStack {
-                                                    Circle()
-                                                        .fill(Color.white)
-                                                        .frame(width: 22, height: 22)
-                                                    Image("phosphor_arrow_up")
-                                                        .renderingMode(.template)
-                                                        .resizable()
-                                                        .aspectRatio(contentMode: .fit)
-                                                        .frame(width: 12, height: 12)
-                                                        .foregroundColor(.black)
-                                                }
-                                            }
-                                            .buttonStyle(PlainButtonStyle())
-                                            .padding(.trailing, 8)
                                         }
-                                        .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+                                    }
+                                    .frame(width: 44, height: 44)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(!buttonsExpanded ? Color.black : (isChatHovering ? Color.black.opacity(0.65) : Color.black.opacity(0.4)))
+                                )
+                                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(!buttonsExpanded ? Color.clear : Color.white.opacity(0.3), lineWidth: 1)
+                                )
+                                .shadow(color: !buttonsExpanded ? .clear : .black.opacity(0.2), radius: 5)
+                                .onHover { hovering in
+                                    withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                                        isChatHovering = hovering
+                                    }
+                                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                                }
+                                .onDisappear {
+                                    if isChatHovering {
+                                        NSCursor.pop()
+                                        isChatHovering = false
                                     }
                                 }
-                                .frame(width: !buttonsExpanded ? 44 : 248).frame(minHeight: 44)
-                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(!buttonsExpanded ? Color.black : Color.black.opacity(0.4)))
-                                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(!buttonsExpanded ? Color.clear : Color.white.opacity(0.3), lineWidth: 1))
-                                .shadow(color: !buttonsExpanded ? .clear : .black.opacity(0.2), radius: 5)
-                                .matchedGeometryEffect(id: "edit_m", in: glassSpace)
-                                .offset(x: buttonsExpanded ? -22 : 0)
-                            } else {
-                                TextEditGlassButton(systemIcon: "phosphor_chat", action: {
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                                        isEditExpanded.toggle()
-                                    }
-                                }, isBlackDot: !buttonsExpanded)
+                                .frame(width: 44, height: 44)
                                 .offset(x: buttonsExpanded ? 80 : 0)
-                                .glassEffectID("edit", in: glassSpace)
-                                .matchedGeometryEffect(id: "edit_m", in: glassSpace)
+                                .matchedGeometryEffect(id: "chat_morph", in: glassSpace)
+                                .glassEffectID("chat_morph", in: glassSpace)
+                            } else {
+                                HStack(alignment: .bottom, spacing: 4) {
+                                    TextField("Edit instruction...", text: $customPrompt, axis: .vertical)
+                                        .lineLimit(1...5)
+                                        .textFieldStyle(PlainTextFieldStyle())
+                                        .font(.custom("Geist", size: 14))
+                                        .foregroundColor(.white)
+                                        .padding(.leading, 12)
+                                        .padding(.trailing, 4)
+                                        .padding(.vertical, 10)
+                                        .onSubmit {
+                                            submitCustomPrompt()
+                                        }
+                                    
+                                    Button(action: {
+                                        submitCustomPrompt()
+                                    }) {
+                                        ZStack {
+                                            Circle()
+                                                .fill(Color.white)
+                                                .frame(width: 24, height: 24)
+                                            Image("phosphor_arrow_up")
+                                                .renderingMode(.template)
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fit)
+                                                .frame(width: 13, height: 13)
+                                                .foregroundColor(.black)
+                                        }
+                                        .contentShape(Circle())
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .padding(.trailing, 10)
+                                    .padding(.bottom, 10)
+                                }
+                                .frame(width: 248)
+                                .frame(minHeight: 44)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(Color.black.opacity(0.45))
+                                )
+                                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                )
+                                .shadow(color: .black.opacity(0.2), radius: 5)
+                                .offset(x: buttonsExpanded ? -22 : 0)
+                                .matchedGeometryEffect(id: "chat_morph", in: glassSpace)
+                                .glassEffectID("chat_morph", in: glassSpace)
                             }
                             
-                            if !isEditExpanded {
-                                TextEditGlassButton(systemIcon: "phosphor_x", action: { closeWithAnimation() }, isCloseButton: true, isBlackDot: !buttonsExpanded)
-                                    .offset(x: buttonsExpanded ? 136 : 0)
-                                    .glassEffectID("close", in: glassSpace)
-                            } else {
-                                TextEditGlassButton(systemIcon: "phosphor_x", action: {
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                                        isEditExpanded = false
-                                        customPrompt = ""
+                            // Close button (becomes Back button with right chevron when edit is expanded)
+                            TextEditGlassButton(
+                                systemIcon: isEditExpanded ? "phosphor_caret_right" : "phosphor_x",
+                                action: {
+                                    if isEditExpanded {
+                                        withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
+                                            isEditExpanded = false
+                                            customPrompt = ""
+                                        }
+                                    } else {
+                                        closeWithAnimation()
                                     }
-                                }, isCloseButton: true, isBlackDot: !buttonsExpanded)
-                                    .offset(x: buttonsExpanded ? 136 : 0)
-                                    .glassEffectID("close", in: glassSpace)
-                            }
+                                },
+                                isCloseButton: !isEditExpanded,
+                                isBlackDot: !buttonsExpanded
+                            )
+                            .offset(x: buttonsExpanded ? 136 : 0)
+                            .glassEffectID("close_or_back", in: glassSpace)
                         }
                     }
                     
