@@ -1118,7 +1118,7 @@ open class VariableBlurNSView: NSView {
     }
 }
 
-// MARK: - Border Beam Animation
+// MARK: - Border Glow Wave Animation
 struct BorderBeamView: View {
     var beamColor: Color = Color(red: 0.35, green: 0.65, blue: 1.0)
     var duration: Double = 2.8
@@ -1129,16 +1129,48 @@ struct BorderBeamView: View {
         TimelineView(.animation) { context in
             let time = context.date.timeIntervalSinceReferenceDate
             let angle = (time / duration).truncatingRemainder(dividingBy: 1.0) * 360.0
+            let breath = 0.88 + 0.12 * sin(time * 2.2)
 
-            let beamGradient = AngularGradient(
+            // Spectrum colors representing continuous shifts in wavelength:
+            let cViolet = Color(red: 0.52, green: 0.42, blue: 1.00) // Shorter wavelength (~430nm, indigo/violet)
+            let cRoyal  = Color(red: 0.28, green: 0.50, blue: 1.00) // Mid-short wavelength (~460nm, royal blue)
+            let cSky    = Color(red: 0.24, green: 0.68, blue: 1.00) // Mid wavelength (~475nm, cerulean/sky)
+            let cCyan   = Color(red: 0.12, green: 0.86, blue: 0.96) // Longer wavelength (~500nm, electric aqua)
+            let cPeak   = Color(red: 0.92, green: 0.98, blue: 1.00) // Peak luminescence (pure energy highlight)
+
+            // 2-wave harmonic cycle across 360 degrees:
+            // The entire perimeter remains actively glowing at all times (min opacity >= 0.40),
+            // while waves of varying wavelength (color spectrum) and intensity rotate smoothly around the edge.
+            let waveGradient = AngularGradient(
                 gradient: Gradient(stops: [
-                    .init(color: .clear, location: 0.0),
-                    .init(color: beamColor.opacity(0.0), location: 0.60),
-                    .init(color: beamColor.opacity(0.3), location: 0.72),
-                    .init(color: beamColor.opacity(0.85), location: 0.88),
-                    .init(color: Color.white, location: 0.96),
-                    .init(color: beamColor, location: 0.99),
-                    .init(color: .clear, location: 1.0)
+                    // Wave 1 Trough: Short wavelength (violet-blue), baseline ambient intensity
+                    .init(color: cViolet.opacity(0.42), location: 0.00),
+                    // Ascending: Shifting toward sky blue, rising intensity
+                    .init(color: cRoyal.opacity(0.60),  location: 0.10),
+                    .init(color: cSky.opacity(0.78),    location: 0.18),
+                    // Wave 1 Crest: Long wavelength (cyan) + intense luminous core
+                    .init(color: cCyan.opacity(0.95),   location: 0.25),
+                    .init(color: cPeak.opacity(1.00),   location: 0.28),
+                    .init(color: cCyan.opacity(0.95),   location: 0.31),
+                    // Descending: Softening back toward royal blue
+                    .init(color: cSky.opacity(0.72),    location: 0.38),
+                    .init(color: cRoyal.opacity(0.55),  location: 0.44),
+                    
+                    // Wave 2 Trough: Short wavelength (violet-blue), baseline ambient intensity
+                    .init(color: cViolet.opacity(0.40), location: 0.50),
+                    // Ascending: Shifting toward sky blue, rising intensity
+                    .init(color: cRoyal.opacity(0.60),  location: 0.60),
+                    .init(color: cSky.opacity(0.78),    location: 0.68),
+                    // Wave 2 Crest: Long wavelength (cyan) + intense luminous core
+                    .init(color: cCyan.opacity(0.95),   location: 0.75),
+                    .init(color: cPeak.opacity(1.00),   location: 0.78),
+                    .init(color: cCyan.opacity(0.95),   location: 0.81),
+                    // Descending: Softening back toward royal blue
+                    .init(color: cSky.opacity(0.72),    location: 0.88),
+                    .init(color: cRoyal.opacity(0.55),  location: 0.94),
+                    
+                    // Seamless loop matching 0.00 exactly
+                    .init(color: cViolet.opacity(0.42), location: 1.00)
                 ]),
                 center: .center,
                 startAngle: .degrees(angle),
@@ -1146,26 +1178,27 @@ struct BorderBeamView: View {
             )
 
             ZStack {
-                // Subtle perimeter track
+                // 1. Full perimeter ambient glow (ensures complete edge is actively glowing at all times)
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(beamColor.opacity(0.12), lineWidth: 1.0)
+                    .strokeBorder(beamColor.opacity(0.28 * breath), lineWidth: lineWidth + 4)
+                    .blur(radius: 7)
 
-                // Wide ambient diffuse glow
+                // 2. Wide rotating wavelength & intensity diffuse halo
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(beamGradient, lineWidth: lineWidth + 6)
+                    .strokeBorder(waveGradient, lineWidth: lineWidth + 6)
                     .blur(radius: 8)
-                    .opacity(0.9)
+                    .opacity(0.85 * breath)
 
-                // Mid focused glow
+                // 3. Focused rotating wavelength & intensity mid-glow
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(beamGradient, lineWidth: lineWidth + 2)
+                    .strokeBorder(waveGradient, lineWidth: lineWidth + 2)
                     .blur(radius: 3)
-                    .opacity(0.75)
+                    .opacity(0.90 * breath)
 
-                // Sharp luminous electric core
+                // 4. Sharp crisp luminous electric core
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(beamGradient, lineWidth: lineWidth)
-                    .shadow(color: beamColor.opacity(0.9), radius: 6)
+                    .strokeBorder(waveGradient, lineWidth: lineWidth)
+                    .shadow(color: beamColor.opacity(0.7 * breath), radius: 5)
             }
         }
         .allowsHitTesting(false)
