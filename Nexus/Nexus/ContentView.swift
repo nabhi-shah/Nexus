@@ -392,6 +392,27 @@ struct CaptureOverlayView: View {
                                 .offset(x: buttonsExpanded ? -145 : 0)
                                 .glassEffectID("search", in: glassSpace)
                             
+                            GlassMenuButton(icon: "phosphor_music-notes", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
+                                .offset(x: buttonsExpanded ? -87 : 0)
+                                .glassEffectID("music", in: glassSpace)
+                            
+                            GlassMenuButton(
+                                icon: "phosphor_translate",
+                                action: {
+                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                        buttonsExpanded.toggle()
+                                    }
+                                },
+                                manager: manager,
+                                isBlackDot: !buttonsExpanded
+                            )
+                            .offset(x: buttonsExpanded ? -29 : 0)
+                            .glassEffectID("center", in: glassSpace)
+                            
+                            GlassMenuButton(icon: "phosphor_cursor-text", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
+                                .offset(x: buttonsExpanded ? 29 : 0)
+                                .glassEffectID("text", in: glassSpace)
+                            
                             GlassMenuButton(
                                 icon: "phosphor_clock-counter-clockwise",
                                 action: {
@@ -406,29 +427,8 @@ struct CaptureOverlayView: View {
                                 manager: manager,
                                 isBlackDot: !buttonsExpanded
                             )
-                            .offset(x: buttonsExpanded ? -87 : 0)
+                            .offset(x: buttonsExpanded ? 87 : 0)
                             .glassEffectID("history", in: glassSpace)
-                            
-                            GlassMenuButton(icon: "phosphor_music-notes", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? -29 : 0)
-                                .glassEffectID("music", in: glassSpace)
-                            
-                            GlassMenuButton(
-                                icon: "phosphor_translate",
-                                action: {
-                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                                        buttonsExpanded.toggle()
-                                    }
-                                },
-                                manager: manager,
-                                isBlackDot: !buttonsExpanded
-                            )
-                            .offset(x: buttonsExpanded ? 29 : 0)
-                            .glassEffectID("center", in: glassSpace)
-                            
-                            GlassMenuButton(icon: "phosphor_cursor-text", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? 87 : 0)
-                                .glassEffectID("text", in: glassSpace)
                             
                             GlassMenuButton(icon: "phosphor_x", action: { closeWithAnimation() }, manager: manager, isCloseButton: true, isBlackDot: !buttonsExpanded)
                                 .offset(x: buttonsExpanded ? 145 : 0)
@@ -586,6 +586,10 @@ class LensScraper: ObservableObject {
                 self?.statusText = "Capture cancelled."
                 self?.isScraping = false
                 self?.mainWindow?.orderOut(nil)
+                for window in self?.captureWindows ?? [] {
+                    window.orderOut(nil)
+                }
+                self?.captureWindows.removeAll()
             }
         })
         
@@ -2550,9 +2554,20 @@ struct TextEditGlassButton: View {
 }
 
 
+struct InputBoxHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 44
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 0 {
+            value = next
+        }
+    }
+}
+
 struct TextEditGooeyBackground: View {
     var expanded: Bool
     var isEditExpanded: Bool
+    var inputBoxHeight: CGFloat = 44
     
     var body: some View {
         Canvas { context, size in
@@ -2572,26 +2587,32 @@ struct TextEditGooeyBackground: View {
                 .frame(width: 44, height: 44)
                 .tag(0)
             
-            // Symbol 1: Rephrase
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .frame(width: isEditExpanded ? 44 : 90, height: 44)
-                .offset(x: expanded ? (isEditExpanded ? -22 : -101) : 0)
-                .opacity(isEditExpanded ? 0 : 1)
-                .tag(1)
-            
-            // Symbol 2: Formalize
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .frame(width: isEditExpanded ? 44 : 90, height: 44)
-                .offset(x: expanded ? (isEditExpanded ? -22 : 1) : 0)
-                .opacity(isEditExpanded ? 0 : 1)
-                .tag(2)
+            // Rephrase & Formalize only present when !isEditExpanded
+            if !isEditExpanded {
+                // Symbol 1: Rephrase
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .frame(width: 90, height: 44)
+                    .offset(x: expanded ? -101 : 0)
+                    .transition(.opacity)
+                    .tag(1)
+                
+                // Symbol 2: Formalize
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .frame(width: 90, height: 44)
+                    .offset(x: expanded ? 1 : 0)
+                    .transition(.opacity)
+                    .tag(2)
+            }
             
             // Symbol 3: Chat morphs to Input Box (expands in height anchored to bottom)
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .frame(width: isEditExpanded ? 248 : 44, height: isEditExpanded ? 72 : 44)
+                .frame(
+                    width: isEditExpanded ? 248 : 44,
+                    height: isEditExpanded ? inputBoxHeight : 44
+                )
                 .offset(
                     x: expanded ? (isEditExpanded ? -22 : 80) : 0,
-                    y: isEditExpanded ? -14 : 0
+                    y: isEditExpanded ? -(inputBoxHeight - 44) / 2 : 0
                 )
                 .tag(3)
             
@@ -2604,6 +2625,22 @@ struct TextEditGooeyBackground: View {
     }
 }
 
+
+struct BlurModifier: ViewModifier {
+    var radius: CGFloat
+    func body(content: Content) -> some View {
+        content.blur(radius: radius)
+    }
+}
+
+extension AnyTransition {
+    static var blurFade: AnyTransition {
+        .modifier(
+            active: BlurModifier(radius: 12),
+            identity: BlurModifier(radius: 0)
+        ).combined(with: .opacity)
+    }
+}
 
 class EventMonitorHolder {
     var globalMonitor: Any?
@@ -2619,6 +2656,7 @@ struct TextEditOverlayView: View {
     @State private var isEditExpanded = false
     @State private var customPrompt = ""
     @State private var isChatHovering = false
+    @State private var inputBoxHeight: CGFloat = 44
     @ObservedObject var manager = TextEditManager.shared
     
     @State private var monitorHolder = EventMonitorHolder()
@@ -2640,6 +2678,7 @@ struct TextEditOverlayView: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
             buttonsExpanded = false
             isEditExpanded = false
+            inputBoxHeight = 44
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             withAnimation(.easeIn(duration: 0.15)) {
@@ -2658,51 +2697,51 @@ struct TextEditOverlayView: View {
                 
             VStack {
                 ZStack(alignment: .bottom) {
-                    TextEditGooeyBackground(expanded: buttonsExpanded, isEditExpanded: isEditExpanded)
-                        .frame(width: 500, height: 200)
-                        .allowsHitTesting(false)
+                    TextEditGooeyBackground(
+                        expanded: buttonsExpanded,
+                        isEditExpanded: isEditExpanded,
+                        inputBoxHeight: isEditExpanded ? inputBoxHeight : 44
+                    )
+                    .frame(width: 500, height: 200)
+                    .allowsHitTesting(false)
                     
                     GlassEffectContainer(spacing: 12) {
                         ZStack(alignment: .bottom) {
-                            TextEditGlassButton(
-                                systemIcon: "phosphor_translate",
-                                title: "Rephrase",
-                                action: {
-                                    manager.processText(action: "rephrase") { success, newText in
-                                        if success, let newText = newText { 
-                                            closeWithAnimation()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
+                            if !isEditExpanded {
+                                TextEditGlassButton(
+                                    systemIcon: "phosphor_translate",
+                                    title: "Rephrase",
+                                    action: {
+                                        manager.processText(action: "rephrase") { success, newText in
+                                            if success, let newText = newText { 
+                                                closeWithAnimation()
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
+                                            }
                                         }
-                                    }
-                                },
-                                isBlackDot: !buttonsExpanded
-                            )
-                            .offset(x: buttonsExpanded ? (isEditExpanded ? -40 : -101) : 0)
-                            .blur(radius: isEditExpanded ? 16 : 0)
-                            .opacity(isEditExpanded ? 0 : 1)
-                            .scaleEffect(isEditExpanded ? 0.9 : 1.0)
-                            .allowsHitTesting(!isEditExpanded)
-                            .glassEffectID("rephrase", in: glassSpace)
-                            
-                            TextEditGlassButton(
-                                systemIcon: "phosphor_briefcase",
-                                title: "Formalize",
-                                action: {
-                                    manager.processText(action: "formalize") { success, newText in
-                                        if success, let newText = newText { 
-                                            closeWithAnimation()
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
+                                    },
+                                    isBlackDot: !buttonsExpanded
+                                )
+                                .offset(x: buttonsExpanded ? -101 : 0)
+                                .transition(.blurFade)
+                                .glassEffectID("rephrase", in: glassSpace)
+                                
+                                TextEditGlassButton(
+                                    systemIcon: "phosphor_briefcase",
+                                    title: "Formalize",
+                                    action: {
+                                        manager.processText(action: "formalize") { success, newText in
+                                            if success, let newText = newText { 
+                                                closeWithAnimation()
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { manager.replaceText(newText: newText) }
+                                            }
                                         }
-                                    }
-                                },
-                                isBlackDot: !buttonsExpanded
-                            )
-                            .offset(x: buttonsExpanded ? (isEditExpanded ? -10 : 1) : 0)
-                            .blur(radius: isEditExpanded ? 16 : 0)
-                            .opacity(isEditExpanded ? 0 : 1)
-                            .scaleEffect(isEditExpanded ? 0.9 : 1.0)
-                            .allowsHitTesting(!isEditExpanded)
-                            .glassEffectID("formalize", in: glassSpace)
+                                    },
+                                    isBlackDot: !buttonsExpanded
+                                )
+                                .offset(x: buttonsExpanded ? 1 : 0)
+                                .transition(.blurFade)
+                                .glassEffectID("formalize", in: glassSpace)
+                            }
                             
                             // Chat button morphing to expanded input box
                             if !isEditExpanded {
@@ -2757,9 +2796,10 @@ struct TextEditOverlayView: View {
                                         .textFieldStyle(PlainTextFieldStyle())
                                         .font(.custom("Geist", size: 14))
                                         .foregroundColor(.white)
-                                        .padding(.leading, 12)
+                                        .padding(.leading, 14)
                                         .padding(.trailing, 4)
-                                        .padding(.vertical, 10)
+                                        .padding(.top, 12)
+                                        .padding(.bottom, 12)
                                         .onSubmit {
                                             submitCustomPrompt()
                                         }
@@ -2769,7 +2809,7 @@ struct TextEditOverlayView: View {
                                     }) {
                                         ZStack {
                                             Circle()
-                                                .fill(Color.white)
+                                                .fill(customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.white.opacity(0.3) : Color.white)
                                                 .frame(width: 24, height: 24)
                                             Image("phosphor_arrow_up")
                                                 .renderingMode(.template)
@@ -2781,11 +2821,17 @@ struct TextEditOverlayView: View {
                                         .contentShape(Circle())
                                     }
                                     .buttonStyle(PlainButtonStyle())
+                                    .disabled(customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                                     .padding(.trailing, 10)
                                     .padding(.bottom, 10)
                                 }
                                 .frame(width: 248)
-                                .frame(minHeight: 72)
+                                .frame(minHeight: 44, maxHeight: 115)
+                                .background(
+                                    GeometryReader { geo in
+                                        Color.clear.preference(key: InputBoxHeightKey.self, value: geo.size.height)
+                                    }
+                                )
                                 .background(
                                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                                         .fill(Color.black.opacity(0.45))
@@ -2809,6 +2855,7 @@ struct TextEditOverlayView: View {
                                         withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
                                             isEditExpanded = false
                                             customPrompt = ""
+                                            inputBoxHeight = 44
                                         }
                                     } else {
                                         closeWithAnimation()
@@ -2822,6 +2869,11 @@ struct TextEditOverlayView: View {
                         }
                     }
                     .padding(.bottom, 78)
+                    .onPreferenceChange(InputBoxHeightKey.self) { newHeight in
+                        if newHeight >= 44 && abs(newHeight - inputBoxHeight) > 0.5 {
+                            inputBoxHeight = newHeight
+                        }
+                    }
                     
                     if manager.isProcessing {
                         BorderBeamView(
@@ -2830,7 +2882,7 @@ struct TextEditOverlayView: View {
                             lineWidth: 2.0,
                             cornerRadius: 14
                         )
-                        .frame(width: isEditExpanded ? 248 : 320, height: isEditExpanded ? 72 : 44)
+                        .frame(width: isEditExpanded ? 248 : 320, height: isEditExpanded ? inputBoxHeight : 44)
                         .offset(x: isEditExpanded ? (buttonsExpanded ? -22 : 0) : 0)
                         .padding(.bottom, 78)
                         
