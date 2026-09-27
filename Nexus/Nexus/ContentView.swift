@@ -919,6 +919,7 @@ class LensScraper: ObservableObject {
             do {
                 let (bytes, response) = try await URLSession.shared.bytes(for: request)
                 if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                    print("⚠️ Gemini Overview HTTP Error: \(http.statusCode)")
                     await MainActor.run {
                         self?.isOverviewLoading = false
                     }
@@ -927,22 +928,25 @@ class LensScraper: ObservableObject {
                 
                 for try await line in bytes.lines {
                     guard !Task.isCancelled else { return }
-                    if line.hasPrefix("data: ") {
-                        let jsonStr = String(line.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !jsonStr.isEmpty,
-                              let data = jsonStr.data(using: .utf8),
-                              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                              let candidates = json["candidates"] as? [[String: Any]],
-                              let first = candidates.first,
-                              let content = first["content"] as? [String: Any],
-                              let parts = content["parts"] as? [[String: Any]],
-                              let textPart = parts.first?["text"] as? String,
-                              !textPart.isEmpty else {
-                            continue
-                        }
-                        
-                        await MainActor.run {
-                            self?.overview.append(textPart)
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard trimmed.hasPrefix("data:") else { continue }
+                    let jsonStr = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if jsonStr.isEmpty || jsonStr == "[DONE]" { continue }
+                    
+                    guard let data = jsonStr.data(using: .utf8),
+                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let candidates = json["candidates"] as? [[String: Any]],
+                          let first = candidates.first,
+                          let content = first["content"] as? [String: Any],
+                          let parts = content["parts"] as? [[String: Any]] else {
+                        continue
+                    }
+                    
+                    for part in parts {
+                        if let text = part["text"] as? String, !text.isEmpty {
+                            await MainActor.run {
+                                self?.overview.append(text)
+                            }
                         }
                     }
                 }
@@ -951,6 +955,7 @@ class LensScraper: ObservableObject {
                     self?.isOverviewLoading = false
                 }
             } catch {
+                print("⚠️ Gemini Overview Stream Error: \(error.localizedDescription)")
                 await MainActor.run {
                     self?.isOverviewLoading = false
                 }
@@ -1266,13 +1271,84 @@ struct SummarySkeletonLoaderView: View {
     }
 }
 
+// MARK: - Streaming Ticker Manager
+@MainActor
+final class StreamingTicker: ObservableObject {
+    @Published var revealedCount: Int = 0
+    private var targetCount: Int = 0
+    private var isFinished: Bool = false
+    private var runningTask: Task<Void, Never>? = nil
+    private let blurWindow: Int = 6
+    
+    func update(fullText: String, isLoading: Bool) {
+        let count = fullText.count
+        self.targetCount = count
+        self.isFinished = !isLoading && count > 0
+        
+        if count == 0 {
+            runningTask?.cancel()
+            runningTask = nil
+            revealedCount = 0
+            return
+        }
+        
+        // If results were already complete before view mounted, reveal immediately
+        if !isLoading && runningTask == nil && revealedCount == 0 {
+            revealedCount = count + blurWindow
+            return
+        }
+        
+        if !isLoading && revealedCount >= targetCount + blurWindow {
+            return
+        }
+        
+        if runningTask == nil || runningTask?.isCancelled == true {
+            startLoop()
+        }
+    }
+    
+    func cancel() {
+        runningTask?.cancel()
+        runningTask = nil
+    }
+    
+    private func startLoop() {
+        runningTask?.cancel()
+        runningTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self = self else { break }
+                
+                let maxTarget = self.isFinished ? (self.targetCount + self.blurWindow) : self.targetCount
+                
+                if self.revealedCount < maxTarget {
+                    let remaining = self.targetCount - self.revealedCount
+                    let step: Int
+                    if remaining > 30 {
+                        step = 4
+                    } else if remaining > 15 {
+                        step = 2
+                    } else {
+                        step = 1
+                    }
+                    self.revealedCount = min(self.revealedCount + step, maxTarget)
+                    try? await Task.sleep(nanoseconds: 12_000_000)
+                } else if self.isFinished {
+                    self.revealedCount = max(self.revealedCount, self.targetCount + self.blurWindow)
+                    break
+                } else {
+                    try? await Task.sleep(nanoseconds: 16_000_000)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Streaming AI Overview View
 struct StreamingOverviewView: View {
     var fullText: String
     var isLoading: Bool
     
-    @State private var revealedCount: Int = 0
-    @State private var tickerTask: Task<Void, Never>? = nil
+    @StateObject private var ticker = StreamingTicker()
     private let blurWindow: Int = 6
     
     var body: some View {
@@ -1284,7 +1360,7 @@ struct StreamingOverviewView: View {
                 Text(fullText)
                     .font(.custom("Averia Serif Libre", size: 20))
                     .foregroundColor(.primary)
-                    .textRenderer(StreamingBlurTextRenderer(revealedCount: revealedCount, totalChars: fullText.count, blurWindow: blurWindow))
+                    .textRenderer(StreamingBlurTextRenderer(revealedCount: ticker.revealedCount, totalChars: fullText.count, blurWindow: blurWindow))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .transition(.opacity.animation(.easeOut(duration: 0.25)))
             }
@@ -1292,50 +1368,16 @@ struct StreamingOverviewView: View {
         .padding(.top, 4)
         .padding(.bottom, 2)
         .onChange(of: fullText) { newText in
-            startOrAdvanceTicker(targetCount: newText.count)
+            ticker.update(fullText: newText, isLoading: isLoading)
+        }
+        .onChange(of: isLoading) { newLoading in
+            ticker.update(fullText: fullText, isLoading: newLoading)
         }
         .onAppear {
-            if !fullText.isEmpty {
-                startOrAdvanceTicker(targetCount: fullText.count)
-            }
+            ticker.update(fullText: fullText, isLoading: isLoading)
         }
         .onDisappear {
-            tickerTask?.cancel()
-            tickerTask = nil
-        }
-    }
-    
-    private func startOrAdvanceTicker(targetCount: Int) {
-        if targetCount == 0 {
-            tickerTask?.cancel()
-            revealedCount = 0
-            return
-        }
-        
-        if tickerTask == nil || tickerTask?.isCancelled == true {
-            tickerTask = Task { @MainActor in
-                while !Task.isCancelled {
-                    let totalTarget = fullText.count + blurWindow
-                    if revealedCount < totalTarget {
-                        let remaining = fullText.count - revealedCount
-                        let step: Int
-                        if remaining > 25 {
-                            step = 3
-                        } else if remaining > 10 {
-                            step = 2
-                        } else {
-                            step = 1
-                        }
-                        
-                        revealedCount += step
-                        try? await Task.sleep(nanoseconds: 14_000_000)
-                    } else if !isLoading {
-                        break
-                    } else {
-                        try? await Task.sleep(nanoseconds: 20_000_000)
-                    }
-                }
-            }
+            ticker.cancel()
         }
     }
 }
