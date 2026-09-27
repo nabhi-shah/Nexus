@@ -2586,10 +2586,13 @@ struct TextEditGooeyBackground: View {
                 .opacity(isEditExpanded ? 0 : 1)
                 .tag(2)
             
-            // Symbol 3: Chat morphs to Input Box
+            // Symbol 3: Chat morphs to Input Box (expands in height anchored to bottom)
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .frame(width: isEditExpanded ? 248 : 44, height: 44)
-                .offset(x: expanded ? (isEditExpanded ? -22 : 80) : 0)
+                .frame(width: isEditExpanded ? 248 : 44, height: isEditExpanded ? 72 : 44)
+                .offset(
+                    x: expanded ? (isEditExpanded ? -22 : 80) : 0,
+                    y: isEditExpanded ? -14 : 0
+                )
                 .tag(3)
             
             // Symbol 4: Close / Back
@@ -2654,13 +2657,13 @@ struct TextEditOverlayView: View {
                 .onTapGesture { closeWithAnimation() }
                 
             VStack {
-                ZStack(alignment: .center) {
+                ZStack(alignment: .bottom) {
                     TextEditGooeyBackground(expanded: buttonsExpanded, isEditExpanded: isEditExpanded)
                         .frame(width: 500, height: 200)
                         .allowsHitTesting(false)
                     
                     GlassEffectContainer(spacing: 12) {
-                        ZStack(alignment: .center) {
+                        ZStack(alignment: .bottom) {
                             TextEditGlassButton(
                                 systemIcon: "phosphor_translate",
                                 title: "Rephrase",
@@ -2674,8 +2677,10 @@ struct TextEditOverlayView: View {
                                 },
                                 isBlackDot: !buttonsExpanded
                             )
-                            .offset(x: buttonsExpanded ? (isEditExpanded ? -22 : -101) : 0)
+                            .offset(x: buttonsExpanded ? (isEditExpanded ? -40 : -101) : 0)
+                            .blur(radius: isEditExpanded ? 16 : 0)
                             .opacity(isEditExpanded ? 0 : 1)
+                            .scaleEffect(isEditExpanded ? 0.9 : 1.0)
                             .allowsHitTesting(!isEditExpanded)
                             .glassEffectID("rephrase", in: glassSpace)
                             
@@ -2692,8 +2697,10 @@ struct TextEditOverlayView: View {
                                 },
                                 isBlackDot: !buttonsExpanded
                             )
-                            .offset(x: buttonsExpanded ? (isEditExpanded ? -22 : 1) : 0)
+                            .offset(x: buttonsExpanded ? (isEditExpanded ? -10 : 1) : 0)
+                            .blur(radius: isEditExpanded ? 16 : 0)
                             .opacity(isEditExpanded ? 0 : 1)
+                            .scaleEffect(isEditExpanded ? 0.9 : 1.0)
                             .allowsHitTesting(!isEditExpanded)
                             .glassEffectID("formalize", in: glassSpace)
                             
@@ -2778,7 +2785,7 @@ struct TextEditOverlayView: View {
                                     .padding(.bottom, 10)
                                 }
                                 .frame(width: 248)
-                                .frame(minHeight: 44)
+                                .frame(minHeight: 72)
                                 .background(
                                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                                         .fill(Color.black.opacity(0.45))
@@ -2814,6 +2821,7 @@ struct TextEditOverlayView: View {
                             .glassEffectID("close_or_back", in: glassSpace)
                         }
                     }
+                    .padding(.bottom, 78)
                     
                     if manager.isProcessing {
                         BorderBeamView(
@@ -2822,12 +2830,13 @@ struct TextEditOverlayView: View {
                             lineWidth: 2.0,
                             cornerRadius: 14
                         )
-                        .frame(width: isEditExpanded ? 248 : 320, height: 44)
+                        .frame(width: isEditExpanded ? 248 : 320, height: isEditExpanded ? 72 : 44)
                         .offset(x: isEditExpanded ? (buttonsExpanded ? -22 : 0) : 0)
+                        .padding(.bottom, 78)
                         
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .padding(.top, 80)
+                            .padding(.bottom, 120)
                     }
                     
                     if !manager.errorMessage.isEmpty {
@@ -2836,7 +2845,7 @@ struct TextEditOverlayView: View {
                             .padding(8)
                             .background(Color.black.opacity(0.7))
                             .cornerRadius(8)
-                            .padding(.top, 80)
+                            .padding(.bottom, 120)
                     }
                 }
                 .scaleEffect(isVisible ? 1.0 : 0.01, anchor: .center)
