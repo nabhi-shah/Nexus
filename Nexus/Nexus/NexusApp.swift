@@ -38,13 +38,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Setup menu bar icon
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            if let image = NSImage(named: "MenuBarIcon") {
+            if let image = NSImage(named: "MenuBarIcon") ?? NSImage(named: "phosphor_corners_out") {
                 image.isTemplate = true
                 // Keep aspect ratio 84:81 roughly
                 image.size = NSSize(width: 16, height: 16)
                 button.image = image
-            } else {
-                button.image = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: "Nexus Capture")
             }
             button.action = #selector(menuBarClicked)
             button.target = self

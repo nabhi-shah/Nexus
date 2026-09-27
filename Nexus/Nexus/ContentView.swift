@@ -1586,8 +1586,11 @@ struct ContentView: View {
                             } else {
                                 VStack(spacing: 16) {
                                     if scraper.statusText.contains("Error") || scraper.statusText.contains("Failed") {
-                                        Image(systemName: "exclamationmark.triangle.fill")
-                                            .font(.custom("Geist", size: 50))
+                                        Image("phosphor_warning")
+                                            .renderingMode(.template)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(width: 48, height: 48)
                                             .foregroundColor(.red)
                                             .padding(.top, 40)
                                         Text("Search Failed")
@@ -1599,8 +1602,11 @@ struct ContentView: View {
                                             .multilineTextAlignment(.center)
                                             .padding(.horizontal, 20)
                                     } else {
-                                        Image(systemName: "photo.on.rectangle.angled")
-                                            .font(.custom("Geist", size: 60))
+                                        Image("phosphor_image")
+                                            .renderingMode(.template)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(width: 56, height: 56)
                                             .foregroundColor(.secondary)
                                             .padding(.top, 40)
                                         Text("Ready.")
@@ -1732,16 +1738,11 @@ struct ContentView: View {
                             }
                         
                         if !searchText.isEmpty {
-                            Button(action: {
+                            SearchClearButton {
                                 searchText = ""
                                 searchTask?.cancel()
                                 scraper.searchWithCombinedQuery(text: "")
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.white.opacity(0.45))
-                                    .font(.system(size: 14))
                             }
-                            .buttonStyle(PlainButtonStyle())
                         }
                     }
                     .padding(8)
@@ -2482,20 +2483,13 @@ struct TextEditGlassButton: View {
                             .foregroundColor(.white)
                             .transition(.opacity.animation(.easeInOut(duration: 0.3)))
                     } else {
-                        if systemIcon.hasPrefix("phosphor_") {
-                            Image(systemIcon)
-                                .renderingMode(.template)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 18, height: 18)
-                                .foregroundColor(isCloseButton ? .red : .white)
-                                .transition(.opacity.animation(.easeInOut(duration: 0.3)))
-                        } else {
-                            Image(systemName: systemIcon)
-                                .font(.custom("Geist", size: 16).weight(.semibold))
-                                .foregroundColor(isCloseButton ? .red : .white)
-                                .transition(.opacity.animation(.easeInOut(duration: 0.3)))
-                        }
+                        Image(systemIcon.hasPrefix("phosphor_") ? systemIcon : "phosphor_\(systemIcon)")
+                            .renderingMode(.template)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 18, height: 18)
+                            .foregroundColor(isCloseButton ? .red : .white)
+                            .transition(.opacity.animation(.easeInOut(duration: 0.3)))
                     }
                 }
             }
@@ -2615,7 +2609,7 @@ struct TextEditOverlayView: View {
                                 .offset(x: buttonsExpanded ? -101 : 0)
                                 .glassEffectID("rephrase", in: glassSpace)
                                 
-                                TextEditGlassButton(systemIcon: "briefcase", title: "Formalize", action: {
+                                TextEditGlassButton(systemIcon: "phosphor_briefcase", title: "Formalize", action: {
                                     manager.processText(action: "formalize") { success, newText in
                                         if success, let newText = newText { 
                                             closeWithAnimation()
@@ -2658,9 +2652,17 @@ struct TextEditOverlayView: View {
                                                     }
                                                 }
                                             }) {
-                                                Image(systemName: "arrow.up.circle.fill")
-                                                    .foregroundColor(.white)
-                                                    .font(.custom("Geist", size: 20))
+                                                ZStack {
+                                                    Circle()
+                                                        .fill(Color.white)
+                                                        .frame(width: 22, height: 22)
+                                                    Image("phosphor_arrow_up")
+                                                        .renderingMode(.template)
+                                                        .resizable()
+                                                        .aspectRatio(contentMode: .fit)
+                                                        .frame(width: 12, height: 12)
+                                                        .foregroundColor(.black)
+                                                }
                                             }
                                             .buttonStyle(PlainButtonStyle())
                                             .padding(.trailing, 8)
@@ -2816,7 +2818,14 @@ struct VisualMatchCard: View {
                         RoundedRectangle(cornerRadius: 14)
                             .fill(Color.white.opacity(0.06))
                             .frame(width: cardWidth, height: cardWidth * 0.75)
-                            .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+                            .overlay(
+                                Image("phosphor_image")
+                                    .renderingMode(.template)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 24, height: 24)
+                                    .foregroundColor(.secondary)
+                            )
                     } else {
                         RoundedRectangle(cornerRadius: 14)
                             .fill(Color.white.opacity(0.04))
@@ -2829,7 +2838,14 @@ struct VisualMatchCard: View {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(Color.white.opacity(0.06))
                     .frame(width: cardWidth, height: cardWidth * 0.75)
-                    .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+                    .overlay(
+                        Image("phosphor_image")
+                            .renderingMode(.template)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(.secondary)
+                    )
             }
             
             // Text
@@ -2960,4 +2976,42 @@ struct EnlargedImageCloseButton: View {
     }
 }
 
-
+struct SearchClearButton: View {
+    var action: () -> Void
+    @State private var isHovering = false
+    
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(isHovering ? Color.white.opacity(0.2) : Color.white.opacity(0.09))
+                    .frame(width: 18, height: 18)
+                
+                Image("phosphor_x")
+                    .renderingMode(.template)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 9, height: 9)
+                    .foregroundColor(isHovering ? .white : Color.white.opacity(0.65))
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                isHovering = hovering
+            }
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .onDisappear {
+            if isHovering {
+                NSCursor.pop()
+                isHovering = false
+            }
+        }
+    }
+}
