@@ -1,18 +1,31 @@
+# macOS system files
 .DS_Store
-ModuleCache/
-*.app/
-DerivedData/
-xcuserdata/
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Xcode build outputs & caches
 build/
-.build/
-Nexus/build/
+DerivedData/
+ModuleCache/
 *.profraw
-*.py
-*.rb
-test_*
-test.*
-dummy.png
-main
-Nexus/test.png
-Nexus/Nexus/model.gguf
-indow.titlebarSeparatorStyle = .none
+*.profdata
+*.app
+*.dSYM
+
+# Xcode user preferences
+*.xcuserdatad
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+
+# Swift Package Manager
+.build/
+Packages/
+
+# Python & Temporary Artifacts
+*.pyc
+__pycache__/
+*.swp
+*~

@@ -45,4 +45,11 @@ enum AppSecrets {
         UserDefaults.standard.set(key, forKey: "nexus_serp_api_key")
         return key
     }
+    
+    static var geminiModel: String {
+        if let env = ProcessInfo.processInfo.environment["GEMINI_MODEL"], !env.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return env
+        }
+        return "gemini-3.5-flash-lite"
+    }
 }

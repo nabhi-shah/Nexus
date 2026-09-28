@@ -5,6 +5,7 @@ import Combine
 import QuartzCore
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import Vision
 
 struct SerpApiResponse: Codable {
     let visual_matches: [VisualMatch]?
@@ -69,6 +70,299 @@ struct CornerShape: Shape {
     }
 }
 
+struct OCRLine: Identifiable {
+    let id = UUID()
+    let text: String
+    let rect: CGRect
+    let confidence: Float
+}
+
+struct TextBlock: Identifiable {
+    let id = UUID()
+    var lines: [OCRLine]
+    var rect: CGRect
+    var text: String
+}
+
+class OCRClusterer {
+    static func cluster(observations: [VNRecognizedTextObservation], imageSize: CGSize) -> [TextBlock] {
+        var lines: [OCRLine] = []
+        for obs in observations {
+            guard let candidate = obs.topCandidates(1).first, !candidate.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            let box = obs.boundingBox
+            let x = box.minX * imageSize.width
+            let y = (1.0 - box.maxY) * imageSize.height
+            let w = box.width * imageSize.width
+            let h = box.height * imageSize.height
+            lines.append(OCRLine(text: candidate.string, rect: CGRect(x: x, y: y, width: w, height: h), confidence: candidate.confidence))
+        }
+        
+        lines.sort { a, b in
+            if abs(a.rect.minY - b.rect.minY) > 8 {
+                return a.rect.minY < b.rect.minY
+            }
+            return a.rect.minX < b.rect.minX
+        }
+        
+        var blocks: [TextBlock] = []
+        for line in lines {
+            var merged = false
+            for i in 0..<blocks.count {
+                let blockRect = blocks[i].rect
+                let avgHeight = max(14, line.rect.height)
+                let verticalGap = line.rect.minY - blockRect.maxY
+                let horizontalOverlap = max(line.rect.minX, blockRect.minX) <= min(line.rect.maxX, blockRect.maxX) + 40
+                
+                if verticalGap >= -5 && verticalGap <= avgHeight * 1.4 && horizontalOverlap {
+                    blocks[i].lines.append(line)
+                    blocks[i].rect = blockRect.union(line.rect)
+                    blocks[i].text += "\n" + line.text
+                    merged = true
+                    break
+                }
+            }
+            if !merged {
+                blocks.append(TextBlock(lines: [line], rect: line.rect, text: line.text))
+            }
+        }
+        
+        var mergedBlocks: [TextBlock] = []
+        for block in blocks {
+            var combined = false
+            for j in 0..<mergedBlocks.count {
+                let r1 = mergedBlocks[j].rect
+                let r2 = block.rect
+                let vGap = max(0, r2.minY - r1.maxY)
+                let hOverlap = max(r1.minX, r2.minX) <= min(r1.maxX, r2.maxX) + 30
+                if vGap <= 18 && hOverlap {
+                    mergedBlocks[j].lines.append(contentsOf: block.lines)
+                    mergedBlocks[j].rect = r1.union(r2)
+                    mergedBlocks[j].text += "\n" + block.text
+                    combined = true
+                    break
+                }
+            }
+            if !combined {
+                mergedBlocks.append(block)
+            }
+        }
+        
+        return mergedBlocks.map { b in
+            var padded = b
+            let pX: CGFloat = 6
+            let pY: CGFloat = 4
+            padded.rect = CGRect(
+                x: max(0, b.rect.minX - pX),
+                y: max(0, b.rect.minY - pY),
+                width: b.rect.width + pX * 2,
+                height: b.rect.height + pY * 2
+            )
+            return padded
+        }
+    }
+}
+
+struct ScreenBorderWithNotchShape: Shape {
+    var topInset: CGFloat = 0
+    var screenCornerRadius: CGFloat = 14
+    var notchWidth: CGFloat = 216
+    var notchCornerRadius: CGFloat = 10
+    
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let w = rect.width
+        let h = rect.height
+        let r = screenCornerRadius
+        let midX = rect.midX
+        
+        let hasNotch = topInset > 24
+        let nH = hasNotch ? topInset : 0
+        let nW = notchWidth
+        let nR = notchCornerRadius
+        
+        let nLeft = midX - nW / 2
+        let nRight = midX + nW / 2
+        
+        if hasNotch {
+            path.move(to: CGPoint(x: r, y: 0))
+            path.addLine(to: CGPoint(x: nLeft - nR, y: 0))
+            path.addQuadCurve(to: CGPoint(x: nLeft, y: nR), control: CGPoint(x: nLeft, y: 0))
+            path.addLine(to: CGPoint(x: nLeft, y: nH - nR))
+            path.addQuadCurve(to: CGPoint(x: nLeft + nR, y: nH), control: CGPoint(x: nLeft, y: nH))
+            path.addLine(to: CGPoint(x: nRight - nR, y: nH))
+            path.addQuadCurve(to: CGPoint(x: nRight, y: nH - nR), control: CGPoint(x: nRight, y: nH))
+            path.addLine(to: CGPoint(x: nRight, y: nR))
+            path.addQuadCurve(to: CGPoint(x: nRight + nR, y: 0), control: CGPoint(x: nRight, y: 0))
+            path.addLine(to: CGPoint(x: w - r, y: 0))
+        } else {
+            path.move(to: CGPoint(x: r, y: 0))
+            path.addLine(to: CGPoint(x: w - r, y: 0))
+        }
+        
+        path.addQuadCurve(to: CGPoint(x: w, y: r), control: CGPoint(x: w, y: 0))
+        path.addLine(to: CGPoint(x: w, y: h - r))
+        path.addQuadCurve(to: CGPoint(x: w - r, y: h), control: CGPoint(x: w, y: h))
+        path.addLine(to: CGPoint(x: r, y: h))
+        path.addQuadCurve(to: CGPoint(x: 0, y: h - r), control: CGPoint(x: 0, y: h))
+        path.addLine(to: CGPoint(x: 0, y: r))
+        path.addQuadCurve(to: CGPoint(x: r, y: 0), control: CGPoint(x: 0, y: 0))
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct ScreenBeamLoaderView: View {
+    var topInset: CGFloat
+    @State private var rotationAngle: Double = 0
+    @State private var pulse: CGFloat = 0.0
+    
+    var body: some View {
+        GeometryReader { geo in
+            let shape = ScreenBorderWithNotchShape(
+                topInset: topInset,
+                screenCornerRadius: 14,
+                notchWidth: 216,
+                notchCornerRadius: 10
+            )
+            
+            ZStack {
+                shape
+                    .stroke(
+                        Color(red: 0.2, green: 0.5, blue: 1.0).opacity(0.2),
+                        lineWidth: 2.0
+                    )
+                
+                shape
+                    .stroke(
+                        AngularGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: Color(red: 0.1, green: 0.4, blue: 0.9).opacity(0.15), location: 0.0),
+                                .init(color: Color(red: 0.2, green: 0.6, blue: 1.0).opacity(0.4), location: 0.35),
+                                .init(color: Color.white, location: 0.5),
+                                .init(color: Color(red: 0.4, green: 0.85, blue: 1.0), location: 0.55),
+                                .init(color: Color(red: 0.2, green: 0.6, blue: 1.0).opacity(0.4), location: 0.65),
+                                .init(color: Color(red: 0.1, green: 0.4, blue: 0.9).opacity(0.15), location: 1.0)
+                            ]),
+                            center: .center,
+                            angle: .degrees(rotationAngle)
+                        ),
+                        style: StrokeStyle(lineWidth: 3.2 + 1.2 * sin(pulse), lineCap: .round, lineJoin: .round)
+                    )
+                    .shadow(color: Color(red: 0.3, green: 0.7, blue: 1.0).opacity(0.7 + 0.3 * sin(pulse)), radius: 8 + 4 * sin(pulse))
+            }
+            .onAppear {
+                withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
+                    rotationAngle = 360
+                }
+                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                    pulse = .pi * 2
+                }
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
+struct FullScreenDistortionView: View {
+    var image: NSImage?
+    var size: CGSize
+    var distortionTime: Float
+    
+    var body: some View {
+        ZStack {
+            if let img = image {
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
+                    .layerEffect(
+                        ShaderLibrary.chromaticRipple(
+                            .float(distortionTime),
+                            .float2(Float(size.width / 2), Float(size.height / 2)),
+                            .float(35.0),
+                            .float(18.0),
+                            .float(0.003)
+                        ),
+                        maxSampleOffset: CGSize(width: 80, height: 80)
+                    )
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .ignoresSafeArea()
+    }
+}
+
+struct SelectableTextBlockView: View {
+    let block: TextBlock
+    var onCopied: () -> Void
+    @State private var isHovering = false
+    @State private var isCopied = false
+    
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isHovering ? Color(red: 0.1, green: 0.35, blue: 0.8).opacity(0.2) : Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(
+                            isHovering ? Color.cyan.opacity(0.85) : Color.cyan.opacity(0.22),
+                            lineWidth: isHovering ? 1.5 : 0.8
+                        )
+                )
+                .shadow(color: isHovering ? Color.cyan.opacity(0.4) : .clear, radius: 6)
+            
+            Text(block.text)
+                .font(.system(size: max(11, min(16, block.rect.height / CGFloat(max(1, block.lines.count)) * 0.75))))
+                .foregroundColor(.white)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+            
+            if isHovering {
+                Button(action: {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(block.text, forType: .string)
+                    isCopied = true
+                    onCopied()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        isCopied = false
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(isCopied ? "phosphor_check" : "phosphor_copy")
+                            .renderingMode(.template)
+                            .resizable()
+                            .frame(width: 11, height: 11)
+                        Text(isCopied ? "Copied" : "Copy")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(isCopied ? .green : .white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3.5)
+                    .background(Color.black.opacity(0.8))
+                    .cornerRadius(5)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5)
+                            .stroke(isCopied ? Color.green.opacity(0.8) : Color.white.opacity(0.3), lineWidth: 0.8)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .offset(x: -4, y: -10)
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+        }
+        .frame(width: block.rect.width, height: block.rect.height)
+        .position(x: block.rect.midX, y: block.rect.midY)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
 class CaptureManager: ObservableObject {
     @Published var startLoc: CGPoint? = nil
     @Published var currentLoc: CGPoint = .zero
@@ -80,6 +374,13 @@ class CaptureManager: ObservableObject {
     @Published var imagePosition: CGPoint = .zero
     @Published var imageScale: CGFloat = 1.0
     @Published var isAnimatingToWindow = false
+    
+    // Text OCR Mode
+    @Published var isTextOCRActive: Bool = false
+    @Published var isOCRLoading: Bool = false
+    @Published var ocrTextBlocks: [TextBlock] = []
+    @Published var fullScreenImage: NSImage? = nil
+    @Published var distortionTime: Float = 0.0
     
     var isCursorHidden = false
     
@@ -144,7 +445,7 @@ struct GooeyBackground: View {
             context.addFilter(.blur(radius: 12))
             
             context.drawLayer { ctx in
-                for i in 0..<7 {
+                for i in 0..<6 {
                     if let resolved = context.resolveSymbol(id: i) {
                         ctx.draw(resolved, at: CGPoint(x: size.width / 2, y: 22)) // Center of 44pt height view in top-aligned ZStack
                     }
@@ -159,13 +460,12 @@ struct GooeyBackground: View {
                 .offset(y: -22) // Cancel out the y:22 draw position
                 .tag(0)
             
-            // Dots (move with dropYOffset)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -145 : 0, y: dropYOffset).tag(1)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -87 : 0, y: dropYOffset).tag(2)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -29 : 0, y: dropYOffset).tag(3)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 29 : 0, y: dropYOffset).tag(4)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 87 : 0, y: dropYOffset).tag(5)
-            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 145 : 0, y: dropYOffset).tag(6)
+            // 5 Dots (move with dropYOffset)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -116 : 0, y: dropYOffset).tag(1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? -58 : 0, y: dropYOffset).tag(2)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 0 : 0, y: dropYOffset).tag(3)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 58 : 0, y: dropYOffset).tag(4)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).frame(width: 44, height: 44).offset(x: expanded ? 116 : 0, y: dropYOffset).tag(5)
         }
     }
 }
@@ -295,6 +595,7 @@ struct CaptureOverlayView: View {
     @State private var dropYOffset: CGFloat = -20
     @Namespace private var glassSpace
     @State private var isClosing = false
+    @State private var allCopied = false
     
     private func closeWithAnimation() {
         guard !isClosing else { return }
@@ -318,127 +619,302 @@ struct CaptureOverlayView: View {
         }
     }
     
-    var body: some View {
-        ZStack {
-            // Removed Color.clear to allow clicks to pass through
+    private func closeTextOCRMode() {
+        withAnimation(.easeOut(duration: 0.2)) {
+            manager.isTextOCRActive = false
+            manager.isOCRLoading = false
+            manager.ocrTextBlocks = []
+            manager.fullScreenImage = nil
+        }
+        closeWithAnimation()
+    }
+    
+    private func startTextOCRMode() {
+        withAnimation(.easeOut(duration: 0.12)) {
+            buttonsExpanded = false
+            isVisible = false
+        }
+        
+        manager.isTextOCRActive = true
+        manager.isOCRLoading = true
+        manager.ocrTextBlocks = []
+        manager.distortionTime = 0.0
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            let tempFilePath = NSTemporaryDirectory().appending("nexus_fullscreen_ocr.png")
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            p.arguments = ["-x", tempFilePath]
+            try? p.run()
+            p.waitUntilExit()
             
-            // Navy Blue Gradient Overlay with Blur
-            VStack(spacing: 0) {
-                Color.clear
-                    .glassEffect(.regular.tint(Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.6)), in: .rect)
-                    .mask(
-                        LinearGradient(gradient: Gradient(colors: [.black, .clear]), startPoint: .top, endPoint: .bottom)
-                    )
-                    .frame(height: 200)
-                    .offset(y: isVisible ? 0 : -200)
-                Spacer()
-                Color.clear
-                    .glassEffect(.regular.tint(Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.6)), in: .rect)
-                    .mask(
-                        LinearGradient(gradient: Gradient(colors: [.clear, .black]), startPoint: .top, endPoint: .bottom)
-                    )
-                    .frame(height: 200)
-                    .offset(y: isVisible ? 0 : 200)
-            }
-            .ignoresSafeArea(.all, edges: [.bottom, .leading, .trailing])
-            .allowsHitTesting(false)
-            
-            let r = manager.rect
-            
-            // Liquid Glass & Corners
-            ZStack {
-                let dynamicRadius = min(16, min(r.width / 4, r.height / 4))
-                let cSize = min(24, min(r.width / 3, r.height / 3))
-                
-                if !manager.isProcessing {
-                    // Apple Liquid Glass
-                    Color.clear
-                        .frame(width: r.width, height: r.height)
-                        .glassEffect(.clear, in: .rect(cornerRadius: dynamicRadius))
-                    
-                    let thick: CGFloat = 4
-                    let col = Color.white.opacity(0.9)
-                    let sh = Color.black.opacity(0.3)
-                    
-                    CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round))
-                        .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: -r.height/2 + cSize/2).shadow(color: sh, radius: 2)
-                    CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(90))
-                        .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: -r.height/2 + cSize/2).shadow(color: sh, radius: 2)
-                    CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(180))
-                        .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
-                    CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(270))
-                        .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
+            guard FileManager.default.fileExists(atPath: tempFilePath),
+                  let nsImage = NSImage(contentsOfFile: tempFilePath),
+                  let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                DispatchQueue.main.async {
+                    self.manager.isOCRLoading = false
+                    self.manager.isTextOCRActive = false
+                    self.closeWithAnimation()
                 }
-                
-                if manager.isProcessing {
-                    RippleDistortionView(rect: r, cornerRadius: dynamicRadius, manager: manager)
-                        .frame(width: r.width, height: r.height)
-                        .transition(.identity) // Clean seamless swap
+                return
+            }
+            
+            DispatchQueue.main.async {
+                self.manager.fullScreenImage = nsImage
+                withAnimation(.linear(duration: 1.3)) {
+                    self.manager.distortionTime = 1.4
                 }
             }
-            .position(CGPoint(x: r.midX, y: r.midY))
-            .opacity(manager.isHoveringClose ? 0 : 1)
             
-            // Dynamic Glass Island Drop
-            VStack {
-                ZStack(alignment: .top) {
-                    GooeyBackground(expanded: buttonsExpanded, dropYOffset: dropYOffset)
-                        .frame(width: 400, height: 200)
-                        .opacity(buttonsExpanded ? 0 : 1)
-                    
-                    GlassEffectContainer(spacing: 12) {
-                        ZStack {
-                            GlassMenuButton(icon: "phosphor_search", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? -145 : 0)
-                                .glassEffectID("search", in: glassSpace)
-                            
-                            GlassMenuButton(icon: "phosphor_music-notes", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? -87 : 0)
-                                .glassEffectID("music", in: glassSpace)
-                            
-                            GlassMenuButton(
-                                icon: "phosphor_translate",
-                                action: {
-                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                                        buttonsExpanded.toggle()
-                                    }
-                                },
-                                manager: manager,
-                                isBlackDot: !buttonsExpanded
-                            )
-                            .offset(x: buttonsExpanded ? -29 : 0)
-                            .glassEffectID("center", in: glassSpace)
-                            
-                            GlassMenuButton(icon: "phosphor_cursor-text", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? 29 : 0)
-                                .glassEffectID("text", in: glassSpace)
-                            
-                            GlassMenuButton(
-                                icon: "phosphor_clock-counter-clockwise",
-                                action: {
-                                    closeWithAnimation()
-                                    if let delegate = NSApplication.shared.delegate as? AppDelegate {
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                            delegate.scraper.mainWindow?.makeKeyAndOrderFront(nil)
-                                            NSApp.activate(ignoringOtherApps: true)
-                                        }
-                                    }
-                                },
-                                manager: manager,
-                                isBlackDot: !buttonsExpanded
-                            )
-                            .offset(x: buttonsExpanded ? 87 : 0)
-                            .glassEffectID("history", in: glassSpace)
-                            
-                            GlassMenuButton(icon: "phosphor_x", action: { closeWithAnimation() }, manager: manager, isCloseButton: true, isBlackDot: !buttonsExpanded)
-                                .offset(x: buttonsExpanded ? 145 : 0)
-                                .glassEffectID("close", in: glassSpace)
+            DispatchQueue.global(qos: .userInitiated).async {
+                let request = VNRecognizeTextRequest()
+                request.recognitionLevel = .accurate
+                request.usesLanguageCorrection = true
+                
+                let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+                do {
+                    try handler.perform([request])
+                    if let results = request.results {
+                        let screenSize = NSScreen.main?.frame.size ?? nsImage.size
+                        let blocks = OCRClusterer.cluster(observations: results, imageSize: screenSize)
+                        DispatchQueue.main.async {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                self.manager.ocrTextBlocks = blocks
+                                self.manager.isOCRLoading = false
+                            }
                         }
-                        .offset(y: dropYOffset)
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.manager.isOCRLoading = false
                     }
                 }
-                .padding(.top, 0)
-                Spacer()
+            }
+        }
+    }
+    
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                if manager.isTextOCRActive {
+                    // Full screen captured background with center-originating chromatic ripple distortion
+                    FullScreenDistortionView(
+                        image: manager.fullScreenImage,
+                        size: geo.size,
+                        distortionTime: manager.distortionTime
+                    )
+                    
+                    // Rotating amplitude & intensity beam loader around screen and notch during OCR
+                    if manager.isOCRLoading {
+                        ScreenBeamLoaderView(topInset: NSScreen.main?.safeAreaInsets.top ?? 0)
+                            .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+                    }
+                    
+                    // Selectable text blocks over each text layer
+                    if !manager.isOCRLoading {
+                        ForEach(manager.ocrTextBlocks) { block in
+                            SelectableTextBlockView(block: block, onCopied: {})
+                        }
+                        .transition(.opacity.animation(.easeIn(duration: 0.2)))
+                        
+                        // Sleek top control pill under the notch
+                        VStack {
+                            HStack(spacing: 12) {
+                                HStack(spacing: 6) {
+                                    Image("phosphor_cursor-text")
+                                        .renderingMode(.template)
+                                        .resizable()
+                                        .frame(width: 14, height: 14)
+                                        .foregroundColor(.cyan)
+                                    Text("Text Detection")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.white)
+                                    Text("\(manager.ocrTextBlocks.count) blocks")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 2.5)
+                                        .background(Color.white.opacity(0.12))
+                                        .cornerRadius(10)
+                                }
+                                
+                                Divider()
+                                    .frame(height: 14)
+                                    .background(Color.white.opacity(0.3))
+                                
+                                Button(action: {
+                                    let allText = manager.ocrTextBlocks.map { $0.text }.joined(separator: "\n\n")
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(allText, forType: .string)
+                                    allCopied = true
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                        allCopied = false
+                                    }
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(allCopied ? "phosphor_check" : "phosphor_copy")
+                                            .renderingMode(.template)
+                                            .resizable()
+                                            .frame(width: 12, height: 12)
+                                        Text(allCopied ? "Copied All!" : "Copy All")
+                                            .font(.system(size: 12, weight: .medium))
+                                    }
+                                    .foregroundColor(allCopied ? .green : .white)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4.5)
+                                    .background(Color.white.opacity(0.12))
+                                    .cornerRadius(6)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                
+                                Button(action: {
+                                    closeTextOCRMode()
+                                }) {
+                                    Image("phosphor_x")
+                                        .renderingMode(.template)
+                                        .resizable()
+                                        .frame(width: 12, height: 12)
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .padding(6)
+                                        .background(Color.white.opacity(0.12))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .fill(Color.black.opacity(0.75))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                            )
+                            .shadow(color: .black.opacity(0.4), radius: 10)
+                            .padding(.top, (NSScreen.main?.safeAreaInsets.top ?? 0) > 24 ? 44 : 20)
+                            
+                            Spacer()
+                        }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                } else {
+                    // Navy Blue Gradient Overlay with Blur
+                    VStack(spacing: 0) {
+                        Color.clear
+                            .glassEffect(.regular.tint(Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.6)), in: .rect)
+                            .mask(
+                                LinearGradient(gradient: Gradient(colors: [.black, .clear]), startPoint: .top, endPoint: .bottom)
+                            )
+                            .frame(height: 200)
+                            .offset(y: isVisible ? 0 : -200)
+                        Spacer()
+                        Color.clear
+                            .glassEffect(.regular.tint(Color(red: 0.05, green: 0.1, blue: 0.3).opacity(0.6)), in: .rect)
+                            .mask(
+                                LinearGradient(gradient: Gradient(colors: [.clear, .black]), startPoint: .top, endPoint: .bottom)
+                            )
+                            .frame(height: 200)
+                            .offset(y: isVisible ? 0 : 200)
+                    }
+                    .ignoresSafeArea(.all, edges: [.bottom, .leading, .trailing])
+                    .allowsHitTesting(false)
+                    
+                    let r = manager.rect
+                    
+                    // Liquid Glass & Corners
+                    ZStack {
+                        let dynamicRadius = min(16, min(r.width / 4, r.height / 4))
+                        let cSize = min(24, min(r.width / 3, r.height / 3))
+                        
+                        if !manager.isProcessing {
+                            Color.clear
+                                .frame(width: r.width, height: r.height)
+                                .glassEffect(.clear, in: .rect(cornerRadius: dynamicRadius))
+                            
+                            let thick: CGFloat = 4
+                            let col = Color.white.opacity(0.9)
+                            let sh = Color.black.opacity(0.3)
+                            
+                            CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round))
+                                .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: -r.height/2 + cSize/2).shadow(color: sh, radius: 2)
+                            CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(90))
+                                .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: -r.height/2 + cSize/2).shadow(color: sh, radius: 2)
+                            CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(180))
+                                .frame(width: cSize, height: cSize).offset(x: r.width/2 - cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
+                            CornerShape(radius: dynamicRadius).stroke(col, style: StrokeStyle(lineWidth: thick, lineCap: .round, lineJoin: .round)).rotationEffect(.degrees(270))
+                                .frame(width: cSize, height: cSize).offset(x: -r.width/2 + cSize/2, y: r.height/2 - cSize/2).shadow(color: sh, radius: 2)
+                        }
+                        
+                        if manager.isProcessing {
+                            RippleDistortionView(rect: r, cornerRadius: dynamicRadius, manager: manager)
+                                .frame(width: r.width, height: r.height)
+                                .transition(.identity)
+                        }
+                    }
+                    .position(CGPoint(x: r.midX, y: r.midY))
+                    .opacity(manager.isHoveringClose ? 0 : 1)
+                    
+                    // Dynamic Glass Island Drop (Search removed, 5 buttons centered)
+                    VStack {
+                        ZStack(alignment: .top) {
+                            GooeyBackground(expanded: buttonsExpanded, dropYOffset: dropYOffset)
+                                .frame(width: 400, height: 200)
+                                .opacity(buttonsExpanded ? 0 : 1)
+                            
+                            GlassEffectContainer(spacing: 12) {
+                                ZStack {
+                                    GlassMenuButton(icon: "phosphor_music-notes", action: {}, manager: manager, isBlackDot: !buttonsExpanded)
+                                        .offset(x: buttonsExpanded ? -116 : 0)
+                                        .glassEffectID("music", in: glassSpace)
+                                    
+                                    GlassMenuButton(
+                                        icon: "phosphor_translate",
+                                        action: {
+                                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                                buttonsExpanded.toggle()
+                                            }
+                                        },
+                                        manager: manager,
+                                        isBlackDot: !buttonsExpanded
+                                    )
+                                    .offset(x: buttonsExpanded ? -58 : 0)
+                                    .glassEffectID("center", in: glassSpace)
+                                    
+                                    GlassMenuButton(icon: "phosphor_cursor-text", action: {
+                                        startTextOCRMode()
+                                    }, manager: manager, isBlackDot: !buttonsExpanded)
+                                    .offset(x: buttonsExpanded ? 0 : 0)
+                                    .glassEffectID("text", in: glassSpace)
+                                    
+                                    GlassMenuButton(
+                                        icon: "phosphor_clock-counter-clockwise",
+                                        action: {
+                                            closeWithAnimation()
+                                            if let delegate = NSApplication.shared.delegate as? AppDelegate {
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                                    delegate.scraper.mainWindow?.makeKeyAndOrderFront(nil)
+                                                    NSApp.activate(ignoringOtherApps: true)
+                                                }
+                                            }
+                                        },
+                                        manager: manager,
+                                        isBlackDot: !buttonsExpanded
+                                    )
+                                    .offset(x: buttonsExpanded ? 58 : 0)
+                                    .glassEffectID("history", in: glassSpace)
+                                    
+                                    GlassMenuButton(icon: "phosphor_x", action: { closeWithAnimation() }, manager: manager, isCloseButton: true, isBlackDot: !buttonsExpanded)
+                                        .offset(x: buttonsExpanded ? 116 : 0)
+                                        .glassEffectID("close", in: glassSpace)
+                                }
+                                .offset(y: dropYOffset)
+                            }
+                        }
+                        .padding(.top, 0)
+                        Spacer()
+                    }
+                }
             }
         }
         .onAppear {
@@ -463,8 +939,16 @@ struct CaptureOverlayView: View {
             
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .leftMouseDown, .leftMouseUp, .keyDown]) { event in
                 if event.type == .keyDown && event.keyCode == 53 {
-                    closeWithAnimation()
+                    if manager.isTextOCRActive {
+                        closeTextOCRMode()
+                    } else {
+                        closeWithAnimation()
+                    }
                     return nil
+                }
+                
+                if manager.isTextOCRActive {
+                    return event
                 }
                 
                 let global = NSEvent.mouseLocation
@@ -966,7 +1450,7 @@ class LensScraper: ObservableObject {
             prompt = "Analyze this image and identify what is shown. Provide a concise, clear, and helpful overview (1-2 sentences) of what it is, its key features, and context."
         }
         
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse&key=\(geminiApiKey)")!
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(AppSecrets.geminiModel):streamGenerateContent?alt=sse&key=\(geminiApiKey)")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -1863,6 +2347,7 @@ class TextEditManager: ObservableObject {
     static let shared = TextEditManager()
     
     @Published var isProcessing = false
+    @Published var activeAction: String? = nil
     @Published var overlayText = ""
     @Published var errorMessage = ""
     
@@ -2372,11 +2857,14 @@ class TextEditManager: ObservableObject {
     func processText(action: String, customPrompt: String? = nil, completion: @escaping (Bool, String?) -> Void) {
         guard let text = extractedText else {
             self.errorMessage = "No text was selected or found."
+            self.isProcessing = false
+            self.activeAction = nil
             completion(false, nil)
             return
         }
         
         self.originalText = text
+        self.activeAction = action
         self.isProcessing = true
         self.errorMessage = ""
         
@@ -2385,6 +2873,7 @@ class TextEditManager: ObservableObject {
                 let result = try await callGemini(text: text, action: action, customPrompt: customPrompt)
                 
                 DispatchQueue.main.async {
+                    self.activeAction = nil
                     if result.hasPrefix("ERROR:") {
                         self.errorMessage = result.replacingOccurrences(of: "ERROR:", with: "").trimmingCharacters(in: .whitespaces)
                         self.isProcessing = false
@@ -2397,6 +2886,7 @@ class TextEditManager: ObservableObject {
                 }
             } catch {
                 DispatchQueue.main.async {
+                    self.activeAction = nil
                     self.errorMessage = "Failed to reach Gemini: \(error.localizedDescription)"
                     self.isProcessing = false
                     completion(false, nil)
@@ -2412,7 +2902,7 @@ class TextEditManager: ObservableObject {
             return "ERROR: GEMINI_API_KEY is missing."
         }
         
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=\(geminiApiKey)")!
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(AppSecrets.geminiModel):generateContent?key=\(geminiApiKey)")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -2535,7 +3025,7 @@ struct TextEditGlassButton: View {
         .shadow(color: shadowColor, radius: 5)
         .focusable(false)
         .onHover { hovering in
-            withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+            withAnimation(.easeInOut(duration: 0.15)) {
                 isHovering = hovering
             }
             if hovering {
@@ -2556,9 +3046,150 @@ struct TextEditGlassButton: View {
 
 
 
+class PromptNSTextView: NSTextView {
+    var placeholderString: String = "Edit instruction..."
+    var onReturnPressed: (() -> Void)?
+    var onHeightChanged: ((CGFloat) -> Void)?
+    
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        if string.isEmpty {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font ?? NSFont.systemFont(ofSize: 14),
+                .foregroundColor: NSColor.white.withAlphaComponent(0.4)
+            ]
+            let rect = NSRect(x: 2, y: 1, width: bounds.width - 4, height: bounds.height - 2)
+            placeholderString.draw(in: rect, withAttributes: attrs)
+        }
+    }
+    
+    override func keyDown(with event: NSEvent) {
+        // Return without Shift / Command submits
+        if event.keyCode == 36 && !event.modifierFlags.contains(.shift) && !event.modifierFlags.contains(.command) {
+            onReturnPressed?()
+            return
+        }
+        if event.keyCode == 36 && event.modifierFlags.contains(.command) {
+            onReturnPressed?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+    
+    override func didChangeText() {
+        super.didChangeText()
+        notifyHeight()
+    }
+    
+    func notifyHeight() {
+        guard let layoutManager = layoutManager, let textContainer = textContainer else { return }
+        layoutManager.ensureLayout(for: textContainer)
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        let naturalHeight = ceil(usedRect.height)
+        onHeightChanged?(naturalHeight)
+    }
+}
+
+struct PromptTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var height: CGFloat
+    var minHeight: CGFloat = 44
+    var maxHeight: CGFloat = 115
+    var onSubmit: () -> Void
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.scrollerStyle = .overlay
+        scrollView.autohidesScrollers = true
+        scrollView.verticalScrollElasticity = .allowed
+        
+        let textView = PromptNSTextView()
+        let coordinator = context.coordinator
+        textView.delegate = coordinator
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.font = NSFont(name: "Geist-Regular", size: 14) ?? NSFont.systemFont(ofSize: 14)
+        textView.textColor = .white
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.insertionPointColor = .white
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = true
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainerInset = .zero
+        textView.string = text
+        
+        textView.onReturnPressed = { [weak coordinator] in
+            coordinator?.parent.onSubmit()
+        }
+        
+        textView.onHeightChanged = { [weak coordinator] textHeight in
+            coordinator?.updateHeight(textHeight: textHeight)
+        }
+        
+        scrollView.documentView = textView
+        coordinator.textView = textView
+        
+        DispatchQueue.main.async {
+            textView.notifyHeight()
+            textView.window?.makeFirstResponder(textView)
+        }
+        
+        return scrollView
+    }
+    
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let textView = nsView.documentView as? PromptNSTextView else { return }
+        if textView.string != text {
+            textView.string = text
+            textView.notifyHeight()
+        }
+    }
+    
+    class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: PromptTextEditor
+        weak var textView: PromptNSTextView?
+        
+        init(_ parent: PromptTextEditor) {
+            self.parent = parent
+        }
+        
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            parent.text = tv.string
+        }
+        
+        func updateHeight(textHeight: CGFloat) {
+            let singleLineHeight: CGFloat = 18
+            let contentH = max(singleLineHeight, textHeight)
+            let verticalPadding: CGFloat = 20 // 10pt top + 10pt bottom
+            let total = contentH + verticalPadding
+            let clamped = min(parent.maxHeight, max(parent.minHeight, total))
+            if abs(parent.height - clamped) > 0.5 {
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        self.parent.height = clamped
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct TextEditGooeyBackground: View {
     var expanded: Bool
     var isEditExpanded: Bool
+    var inputBoxHeight: CGFloat = 44
     
     var body: some View {
         Canvas { context, size in
@@ -2573,10 +3204,12 @@ struct TextEditGooeyBackground: View {
                 }
             }
         } symbols: {
-            // Anchor / Initial Dot
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .frame(width: 44, height: 44)
-                .tag(0)
+            // Anchor / Initial Dot (only rendered when collapsed to avoid sticky center artifact)
+            if !expanded {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .frame(width: 44, height: 44)
+                    .tag(0)
+            }
             
             // Rephrase & Formalize only present when !isEditExpanded
             if !isEditExpanded {
@@ -2584,25 +3217,26 @@ struct TextEditGooeyBackground: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .frame(width: 90, height: 44)
                     .offset(x: expanded ? -101 : 0)
-                    .transition(.opacity)
+                    .transition(.identity)
                     .tag(1)
                 
                 // Symbol 2: Formalize
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .frame(width: 90, height: 44)
                     .offset(x: expanded ? 1 : 0)
-                    .transition(.opacity)
+                    .transition(.identity)
                     .tag(2)
             }
             
-            // Symbol 3: Chat morphs to Input Box
+            // Symbol 3: Chat morphs to Input Box (expands in height anchored to bottom)
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .frame(
                     width: isEditExpanded ? 248 : 44,
-                    height: 44
+                    height: isEditExpanded ? inputBoxHeight : 44
                 )
                 .offset(
-                    x: expanded ? (isEditExpanded ? -22 : 80) : 0
+                    x: expanded ? (isEditExpanded ? -22 : 80) : 0,
+                    y: isEditExpanded ? -(inputBoxHeight - 44) / 2 : 0
                 )
                 .tag(3)
             
@@ -2646,13 +3280,52 @@ struct TextEditOverlayView: View {
     @State private var isEditExpanded = false
     @State private var customPrompt = ""
     @State private var isChatHovering = false
+    @State private var activeAction: String? = nil
+    @State private var inputBoxHeight: CGFloat = 44
     @ObservedObject var manager = TextEditManager.shared
     
     @State private var monitorHolder = EventMonitorHolder()
     
+    private var activeActionName: String {
+        if let action = activeAction {
+            return action
+        }
+        if let action = manager.activeAction {
+            return action
+        }
+        return isEditExpanded ? "custom" : "rephrase"
+    }
+    
+    private var beamWidth: CGFloat {
+        switch activeActionName {
+        case "rephrase", "formalize":
+            return 90
+        case "custom":
+            return 248
+        default:
+            return isEditExpanded ? 248 : 90
+        }
+    }
+    
+    private var beamOffsetX: CGFloat {
+        guard buttonsExpanded else { return 0 }
+        switch activeActionName {
+        case "rephrase":
+            return -101
+        case "formalize":
+            return 1
+        case "custom":
+            return -22
+        default:
+            return isEditExpanded ? -22 : -101
+        }
+    }
+    
     private func submitCustomPrompt() {
+        guard !manager.isProcessing else { return }
         let prompt = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
+        activeAction = "custom"
         manager.processText(action: "custom", customPrompt: prompt) { success, newText in
             if success, let newText = newText { 
                 closeWithAnimation()
@@ -2664,9 +3337,10 @@ struct TextEditOverlayView: View {
     }
     
     private func closeWithAnimation() {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+        withAnimation(.easeInOut(duration: 0.22)) {
             buttonsExpanded = false
             isEditExpanded = false
+            inputBoxHeight = 44
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             withAnimation(.easeIn(duration: 0.15)) {
@@ -2674,6 +3348,7 @@ struct TextEditOverlayView: View {
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            activeAction = nil
             onCancel()
         }
     }
@@ -2687,7 +3362,8 @@ struct TextEditOverlayView: View {
                 ZStack(alignment: .bottom) {
                     TextEditGooeyBackground(
                         expanded: buttonsExpanded,
-                        isEditExpanded: isEditExpanded
+                        isEditExpanded: isEditExpanded,
+                        inputBoxHeight: isEditExpanded ? inputBoxHeight : 44
                     )
                     .frame(width: 500, height: 200)
                     .allowsHitTesting(false)
@@ -2699,6 +3375,8 @@ struct TextEditOverlayView: View {
                                     systemIcon: "phosphor_translate",
                                     title: "Rephrase",
                                     action: {
+                                        guard !manager.isProcessing else { return }
+                                        activeAction = "rephrase"
                                         manager.processText(action: "rephrase") { success, newText in
                                             if success, let newText = newText { 
                                                 closeWithAnimation()
@@ -2709,13 +3387,15 @@ struct TextEditOverlayView: View {
                                     isBlackDot: !buttonsExpanded
                                 )
                                 .offset(x: buttonsExpanded ? -101 : 0)
-                                .transition(.blurFade)
+                                .transition(.opacity.animation(.easeOut(duration: 0.15)))
                                 .glassEffectID("rephrase", in: glassSpace)
                                 
                                 TextEditGlassButton(
                                     systemIcon: "phosphor_briefcase",
                                     title: "Formalize",
                                     action: {
+                                        guard !manager.isProcessing else { return }
+                                        activeAction = "formalize"
                                         manager.processText(action: "formalize") { success, newText in
                                             if success, let newText = newText { 
                                                 closeWithAnimation()
@@ -2726,14 +3406,15 @@ struct TextEditOverlayView: View {
                                     isBlackDot: !buttonsExpanded
                                 )
                                 .offset(x: buttonsExpanded ? 1 : 0)
-                                .transition(.blurFade)
+                                .transition(.opacity.animation(.easeOut(duration: 0.15)))
                                 .glassEffectID("formalize", in: glassSpace)
                             }
                             
                             // Chat button morphing to expanded input box
                             if !isEditExpanded {
                                 Button(action: {
-                                    withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
+                                    guard !manager.isProcessing else { return }
+                                    withAnimation(.easeInOut(duration: 0.28)) {
                                         isEditExpanded = true
                                     }
                                 }) {
@@ -2761,7 +3442,7 @@ struct TextEditOverlayView: View {
                                 )
                                 .shadow(color: !buttonsExpanded ? .clear : .black.opacity(0.2), radius: 5)
                                 .onHover { hovering in
-                                    withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                                    withAnimation(.easeInOut(duration: 0.15)) {
                                         isChatHovering = hovering
                                     }
                                     if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
@@ -2778,16 +3459,19 @@ struct TextEditOverlayView: View {
                                 .glassEffectID("chat_morph", in: glassSpace)
                             } else {
                                 ZStack(alignment: .bottomTrailing) {
-                                    TextField("Edit instruction...", text: $customPrompt)
-                                        .textFieldStyle(PlainTextFieldStyle())
-                                        .font(.custom("Geist", size: 14))
-                                        .foregroundColor(.white)
-                                        .padding(.leading, 14)
-                                        .padding(.trailing, 38)
-                                        .padding(.vertical, 13)
-                                        .onSubmit {
+                                    PromptTextEditor(
+                                        text: $customPrompt,
+                                        height: $inputBoxHeight,
+                                        minHeight: 44,
+                                        maxHeight: 115,
+                                        onSubmit: {
                                             submitCustomPrompt()
                                         }
+                                    )
+                                    .padding(.leading, 12)
+                                    .padding(.trailing, 36)
+                                    .padding(.vertical, 10)
+                                    .disabled(manager.isProcessing)
                                     
                                     Button(action: {
                                         submitCustomPrompt()
@@ -2806,11 +3490,11 @@ struct TextEditOverlayView: View {
                                         .contentShape(Circle())
                                     }
                                     .buttonStyle(PlainButtonStyle())
-                                    .disabled(customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                    .disabled(customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.isProcessing)
                                     .padding(.trailing, 10)
                                     .padding(.bottom, 10)
                                 }
-                                .frame(width: 248, height: 44)
+                                .frame(width: 248, height: isEditExpanded ? inputBoxHeight : 44)
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 .background(
                                     RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -2825,16 +3509,19 @@ struct TextEditOverlayView: View {
                                 .offset(x: buttonsExpanded ? -22 : 0)
                                 .matchedGeometryEffect(id: "chat_morph", in: glassSpace)
                                 .glassEffectID("chat_morph", in: glassSpace)
+                                .animation(.easeInOut(duration: 0.2), value: inputBoxHeight)
                             }
                             
                             // Close button (becomes Back button with right chevron when edit is expanded)
                             TextEditGlassButton(
                                 systemIcon: isEditExpanded ? "phosphor_caret_right" : "phosphor_x",
                                 action: {
+                                    guard !manager.isProcessing else { return }
                                     if isEditExpanded {
-                                        withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
+                                        withAnimation(.easeInOut(duration: 0.28)) {
                                             isEditExpanded = false
                                             customPrompt = ""
+                                            inputBoxHeight = 44
                                         }
                                     } else {
                                         closeWithAnimation()
@@ -2856,13 +3543,16 @@ struct TextEditOverlayView: View {
                             lineWidth: 2.0,
                             cornerRadius: 14
                         )
-                        .frame(width: isEditExpanded ? 248 : 320, height: 44)
-                        .offset(x: isEditExpanded ? (buttonsExpanded ? -22 : 0) : 0)
+                        .frame(width: beamWidth, height: isEditExpanded ? inputBoxHeight : 44)
+                        .offset(x: beamOffsetX)
                         .padding(.bottom, 78)
+                        .transition(.opacity)
                         
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .padding(.bottom, 120)
+                            .offset(x: beamOffsetX)
+                            .padding(.bottom, 78 + (isEditExpanded ? inputBoxHeight : 44) + 16)
+                            .transition(.opacity)
                     }
                     
                     if !manager.errorMessage.isEmpty {
@@ -2910,7 +3600,7 @@ struct TextEditOverlayView: View {
             }
             
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                withAnimation(.easeOut(duration: 0.26)) {
                     buttonsExpanded = true
                 }
             }
@@ -2924,6 +3614,11 @@ struct TextEditOverlayView: View {
                 if window is CaptureWindow && window.frame.size.width == 500 {
                     closeWithAnimation()
                 }
+            }
+        }
+        .onChange(of: manager.isProcessing) { processing in
+            if !processing {
+                activeAction = nil
             }
         }
     }
