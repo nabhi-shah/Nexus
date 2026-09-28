@@ -1105,11 +1105,6 @@ class LensScraper: ObservableObject {
     }
     
     private func executeScreencapture(rect: CGRect, manager: CaptureManager) {
-        // Temporarily set sharingType to .none during the screenshot so the overlay selection borders are not captured
-        for window in self.captureWindows {
-            window.sharingType = .none
-        }
-        
         let tempFilePath = NSTemporaryDirectory().appending("nexus_temp.png")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
@@ -1119,10 +1114,6 @@ class LensScraper: ObservableObject {
             try process.run()
             process.terminationHandler = { [weak self] _ in
                 DispatchQueue.main.async {
-                    // Restore sharingType to .readOnly so ripple animation and UI appear in screen recordings
-                    for window in self?.captureWindows ?? [] {
-                        window.sharingType = .readOnly
-                    }
                     if FileManager.default.fileExists(atPath: tempFilePath), let img = NSImage(contentsOfFile: tempFilePath) {
                         manager.capturedImage = img
                         self?.capturedImage = img
@@ -1179,9 +1170,6 @@ class LensScraper: ObservableObject {
             }
         } catch {
             DispatchQueue.main.async {
-                for window in self.captureWindows {
-                    window.sharingType = .readOnly
-                }
                 self.statusText = "Capture failed: \(error.localizedDescription)"
                 self.isScraping = false
             }
