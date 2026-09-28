@@ -1455,7 +1455,7 @@ class LensScraper: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        let requestBody: [String: Any] = [
+        var requestBody: [String: Any] = [
             "contents": [
                 [
                     "parts": [
@@ -1466,13 +1466,17 @@ class LensScraper: ObservableObject {
                         ]]
                     ]
                 ]
-            ],
-            "generationConfig": [
+            ]
+        ]
+        
+        // Models with thinking capabilities (like gemini-3.8-flash) support thinkingConfig; gemini-3.5-flash-lite rejects it with HTTP 400
+        if AppSecrets.geminiModel.contains("3.8") {
+            requestBody["generationConfig"] = [
                 "thinkingConfig": [
                     "thinkingBudget": 0
                 ]
             ]
-        ]
+        }
         
         request.httpBody = try? JSONSerialization.data(withJSONObject: requestBody)
         
@@ -1480,7 +1484,11 @@ class LensScraper: ObservableObject {
             do {
                 let (bytes, response) = try await URLSession.shared.bytes(for: request)
                 if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                    print("⚠️ Gemini Overview HTTP Error: \(http.statusCode)")
+                    var errBody = ""
+                    for try await line in bytes.lines {
+                        errBody += line
+                    }
+                    print("⚠️ Gemini Overview HTTP Error \(http.statusCode): \(errBody)")
                     await MainActor.run {
                         self?.isOverviewLoading = false
                     }
